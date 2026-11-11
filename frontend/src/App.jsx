@@ -1,38 +1,46 @@
-import React, { useCallback, useEffect, useState } from 'react'
-import { api, ApiError, getToken, setToken } from './api.js'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { api, ApiError, clearToken, getToken, setToken } from './api.js'
 
 function formatDate(iso) {
   if (!iso) return 'nunca'
   return new Date(iso).toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-function TokenForm({ onDone }) {
-  const [value, setValue] = useState(getToken())
+// ------------------------------------------------------------ código de acceso
+function TokenForm({ onDone, failed }) {
+  const [value, setValue] = useState('')
   return (
-    <form className="card" onSubmit={(e) => { e.preventDefault(); setToken(value.trim()); onDone() }}>
-      <h2>Código de acceso</h2>
-      <p className="muted">El servidor del PC pide un código (APP_ACCESS_TOKEN en backend/.env).</p>
-      <label>Código
-        <input type="password" value={value} onChange={(e) => setValue(e.target.value)} autoFocus />
+    <form className="card" onSubmit={(e) => { e.preventDefault(); setToken(value.trim().toUpperCase()); onDone() }}>
+      <h2>Vincular esta tablet</h2>
+      <p className="muted">
+        Escribe el código de acceso que aparece en la consola del PC al arrancar el servidor
+        (también está en <code>backend/data/access_code</code>). Solo hace falta una vez.
+      </p>
+      {failed && <p className="error" role="alert">Código incorrecto.</p>}
+      <label>Código de acceso
+        <input value={value} onChange={(e) => setValue(e.target.value)} autoFocus
+          autoCapitalize="characters" autoComplete="off" spellCheck="false" required />
       </label>
-      <button type="submit">Continuar</button>
+      <button type="submit">Vincular</button>
     </form>
   )
 }
 
-function CredentialsForm({ initialUser, onSaved, onCancel }) {
-  const [username, setUsername] = useState(initialUser || '')
+// ------------------------------------------------------- conexión Microsoft
+function ConnectForm({ status, reason, onStarted, onCancel }) {
+  const [username, setUsername] = useState(status.username || '')
   const [password, setPassword] = useState('')
+  const [remember, setRemember] = useState(status.password_remembered)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const canReuse = status.password_remembered && username === status.username
 
-  async function submit(e) {
-    e.preventDefault()
+  async function start(manual) {
     setBusy(true); setError('')
     try {
-      await api.saveCredentials(username, password)
+      await api.loginStart({ username: username.trim(), password: password || null, remember_password: remember, manual })
       setPassword('')
-      onSaved()
+      onStarted()
     } catch (err) {
       setError(err.message)
     } finally {
@@ -41,30 +49,115 @@ function CredentialsForm({ initialUser, onSaved, onCancel }) {
   }
 
   return (
-    <form className="card" onSubmit={submit}>
+    <form className="card" onSubmit={(e) => { e.preventDefault(); start(false) }}>
       <h2>Conectar con Florida Oberta</h2>
+      {reason && <p className="notice">{reason}</p>}
       <p className="muted">
-        Tus credenciales se comprueban iniciando sesión en Moodle y se guardan cifradas
-        solo en tu PC. Nunca salen de tu red local salvo hacia Florida Oberta.
+        Inicia sesión con tu cuenta de Microsoft (Office 365) de Florida. Si te pide verificación
+        en dos pasos, aquí verás el número o podrás escribir el código.
       </p>
-      <label>Usuario
-        <input value={username} onChange={(e) => setUsername(e.target.value)}
+      <label>Correo institucional
+        <input type="email" value={username} onChange={(e) => setUsername(e.target.value)}
           autoComplete="username" autoCapitalize="none" required />
       </label>
       <label>Contraseña
         <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-          autoComplete="current-password" required />
+          autoComplete="current-password" required={!canReuse}
+          placeholder={canReuse ? 'Recordada (déjala vacía para usarla)' : ''} />
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+        <span>Recordar contraseña en el PC (cifrada). Si no la recuerdas, la pediré cuando caduque la sesión.</span>
       </label>
       {error && <p className="error" role="alert">{error}</p>}
       <div className="row">
-        <button type="submit" disabled={busy}>{busy ? 'Comprobando…' : 'Iniciar sesión y guardar'}</button>
+        <button type="submit" disabled={busy}>{busy ? 'Iniciando…' : 'Conectar'}</button>
         {onCancel && <button type="button" className="secondary" onClick={onCancel} disabled={busy}>Cancelar</button>}
       </div>
+      <details>
+        <summary>¿Tu cuenta usa otro método o falla?</summary>
+        <p className="muted">
+          Puedes iniciar sesión tú mismo en una ventana del navegador que se abrirá en el PC
+          (requiere <code>MOODLE_HEADLESS=false</code> y estar delante del PC).
+        </p>
+        <button type="button" className="secondary" disabled={busy} onClick={() => start(true)}>
+          Iniciar sesión manualmente en el PC
+        </button>
+      </details>
+      <p className="muted small">
+        Tus datos se quedan en tu PC, cifrados, y solo se envían a Florida Oberta y Microsoft.
+        Consulta la pestaña Privacidad.
+      </p>
     </form>
   )
 }
 
-function Courses({ status, onEditCredentials, onLogout }) {
+function LoginProgress({ onFinished }) {
+  const [job, setJob] = useState(null)
+  const [code, setCode] = useState('')
+  const [error, setError] = useState('')
+  const timer = useRef(null)
+
+  useEffect(() => {
+    let alive = true
+    async function poll() {
+      try {
+        const s = await api.loginStatus()
+        if (!alive) return
+        setJob(s)
+        if (['success', 'error', 'cancelled', 'idle'].includes(s.state)) {
+          if (s.state === 'success') onFinished(true)
+          return
+        }
+      } catch (err) {
+        if (alive) setError(err.message)
+      }
+      timer.current = setTimeout(poll, 1200)
+    }
+    poll()
+    return () => { alive = false; clearTimeout(timer.current) }
+  }, [onFinished])
+
+  async function sendCode(e) {
+    e.preventDefault()
+    try { setJob(await api.loginCode(code.trim())); setCode('') } catch (err) { setError(err.message) }
+  }
+
+  const state = job?.state
+  return (
+    <div className="card" aria-live="polite">
+      <h2>Iniciando sesión</h2>
+      {state === 'mfa_number' && (
+        <>
+          <p>Abre <strong>Microsoft Authenticator</strong> en tu móvil y escribe este número:</p>
+          <p className="big-number">{job.number}</p>
+        </>
+      )}
+      {state === 'mfa_push' && <p>Aprueba la solicitud en <strong>Microsoft Authenticator</strong> en tu móvil.</p>}
+      {state === 'mfa_code' && (
+        <form onSubmit={sendCode} className="grid">
+          <label>Código de verificación
+            <input inputMode="numeric" autoComplete="one-time-code" value={code}
+              onChange={(e) => setCode(e.target.value)} autoFocus required />
+          </label>
+          <button type="submit">Enviar código</button>
+        </form>
+      )}
+      {(!state || state === 'working' || state === 'manual') && <p className="spinner">{job?.message || 'Conectando…'}</p>}
+      {state === 'error' && <p className="error" role="alert">{job.message}</p>}
+      {state === 'cancelled' && <p className="muted">{job.message}</p>}
+      {error && <p className="error">{error}</p>}
+      <div className="row">
+        {['error', 'cancelled', 'idle'].includes(state)
+          ? <button onClick={() => onFinished(false)}>Volver</button>
+          : <button className="secondary" onClick={() => api.loginCancel().catch(() => {})}>Cancelar</button>}
+      </div>
+    </div>
+  )
+}
+
+// ------------------------------------------------------------------ cursos
+function Courses({ status, onNeedLogin }) {
   const [courses, setCourses] = useState([])
   const [syncedAt, setSyncedAt] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -77,18 +170,17 @@ function Courses({ status, onEditCredentials, onLogout }) {
       const data = await api.syncCourses()
       setCourses(data.courses); setSyncedAt(data.synced_at)
     } catch (err) {
-      setError(err.message)
+      if (err instanceof ApiError && err.status === 409) onNeedLogin(err.message)
+      else setError(err.message)
     } finally {
       setBusy(false)
     }
-  }, [])
+  }, [onNeedLogin])
 
   useEffect(() => {
-    api.courses().then((data) => {
-      setCourses(data.courses); setSyncedAt(data.synced_at)
-      if (!data.synced_at) sync()
-    }).catch((err) => setError(err.message))
-  }, [sync])
+    api.courses().then((data) => { setCourses(data.courses); setSyncedAt(data.synced_at) })
+      .catch((err) => setError(err.message))
+  }, [])
 
   const q = filter.trim().toLowerCase()
   const visible = q
@@ -100,24 +192,20 @@ function Courses({ status, onEditCredentials, onLogout }) {
       <div className="toolbar">
         <div>
           <h2>Mis cursos</h2>
-          <p className="muted">Sesión: {status.username} · Actualizado: {formatDate(syncedAt)}</p>
+          <p className="muted">{status.username} · Actualizado: {formatDate(syncedAt)}</p>
         </div>
-        <div className="row">
-          <button onClick={sync} disabled={busy}>{busy ? 'Sincronizando…' : 'Actualizar'}</button>
-          <button className="secondary" onClick={onEditCredentials}>Cambiar cuenta</button>
-          <button className="secondary danger" onClick={onLogout}>Olvidar credenciales</button>
-        </div>
+        <button onClick={sync} disabled={busy}>{busy ? 'Sincronizando…' : 'Actualizar'}</button>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
       {courses.length > 5 && (
         <input className="search" placeholder="Buscar curso…" value={filter}
           onChange={(e) => setFilter(e.target.value)} />
       )}
-      {!busy && courses.length === 0 && !error && <p className="muted">No hay cursos todavía.</p>}
+      {!busy && courses.length === 0 && !error && <p className="muted">No hay cursos todavía. Pulsa «Actualizar».</p>}
       <ul className="courses">
         {visible.map((c) => (
           <li key={c.id} className="course">
-            <a href={c.url} target="_blank" rel="noreferrer">
+            <a href={c.url} target="_blank" rel="noreferrer noopener">
               <span className="course-name">{c.fullname}</span>
               <span className="course-meta">
                 {[c.shortname, c.category].filter(Boolean).join(' · ') || `ID ${c.id}`}
@@ -130,49 +218,122 @@ function Courses({ status, onEditCredentials, onLogout }) {
   )
 }
 
+// -------------------------------------------------------------- privacidad
+function Privacy({ onChanged }) {
+  const [info, setInfo] = useState(null)
+  const [error, setError] = useState('')
+  const load = useCallback(() => api.privacy().then(setInfo).catch((e) => setError(e.message)), [])
+  useEffect(() => { load() }, [load])
+
+  async function logout() {
+    if (!window.confirm('¿Cerrar sesión? Se borran las cookies y la contraseña recordada del PC.')) return
+    await api.logout().catch((e) => setError(e.message)); load(); onChanged()
+  }
+  async function wipe() {
+    if (!window.confirm('¿Borrar TODOS los datos de la app en el PC? Se destruye también la clave de cifrado. No se puede deshacer.')) return
+    await api.deleteAll().catch((e) => setError(e.message)); load(); onChanged()
+  }
+  function unlink() {
+    if (!window.confirm('¿Desvincular esta tablet? Tendrás que volver a escribir el código de acceso.')) return
+    clearToken(); window.location.reload()
+  }
+
+  return (
+    <section className="privacy">
+      <h2>Privacidad y datos</h2>
+      <p className="muted">
+        La app funciona solo en tu PC y tu red local. No usa servidores propios, analítica ni
+        terceros: solo se conecta a Florida Oberta y a Microsoft, igual que tu navegador.
+      </p>
+      {error && <p className="error">{error}</p>}
+      {info && (
+        <>
+          <table>
+            <thead><tr><th>Dato</th><th>¿Guardado?</th><th>Protección</th></tr></thead>
+            <tbody>
+              {info.items.map((i) => (
+                <tr key={i.what}>
+                  <td>{i.what}{i.detail && <div className="muted small">{i.detail}</div>}</td>
+                  <td>{i.stored ? 'Sí' : 'No'}</td>
+                  <td>{i.protection}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <h3>No se guarda</h3>
+          <ul>{info.not_stored.map((t) => <li key={t}>{t}</li>)}</ul>
+          <p className="muted small">Ubicación en el PC: <code>{info.location}</code></p>
+        </>
+      )}
+      <div className="row">
+        <button className="secondary" onClick={logout}>Cerrar sesión</button>
+        <button className="secondary" onClick={unlink}>Desvincular esta tablet</button>
+        <button className="secondary danger" onClick={wipe}>Borrar todos mis datos</button>
+      </div>
+    </section>
+  )
+}
+
+// --------------------------------------------------------------------- app
 export default function App() {
   const [status, setStatus] = useState(null)
   const [error, setError] = useState('')
-  const [needToken, setNeedToken] = useState(false)
-  const [editing, setEditing] = useState(false)
+  const [token, setTokenState] = useState({ need: false, failed: false })
+  const [view, setView] = useState('courses')
+  const [connect, setConnect] = useState({ open: false, reason: '' })
+  const [loggingIn, setLoggingIn] = useState(false)
 
   const load = useCallback(async () => {
     setError('')
     try {
-      setStatus(await api.status()); setNeedToken(false)
+      const s = await api.status()
+      setStatus(s); setTokenState({ need: false, failed: false })
+      if (s.login && !['success', 'error', 'cancelled'].includes(s.login.state)) setLoggingIn(true)
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) setNeedToken(true)
+      if (err instanceof ApiError && err.status === 401) setTokenState({ need: true, failed: Boolean(getToken()) })
       else setError(err.message)
     }
   }, [])
 
   useEffect(() => { load() }, [load])
 
-  async function logout() {
-    if (!window.confirm('¿Borrar las credenciales y la sesión guardadas en el PC?')) return
-    try { await api.deleteCredentials(); await load() } catch (err) { setError(err.message) }
-  }
+  const onLoginFinished = useCallback((ok) => {
+    setLoggingIn(false)
+    if (ok) setConnect({ open: false, reason: '' })
+    load()
+  }, [load])
+  const onNeedLogin = useCallback((reason) => setConnect({ open: true, reason }), [])
 
   let body
-  if (needToken) body = <TokenForm onDone={load} />
+  if (token.need) body = <TokenForm onDone={load} failed={token.failed} />
   else if (error) body = <div className="card"><p className="error">{error}</p><button onClick={load}>Reintentar</button></div>
   else if (!status) body = <p className="muted">Cargando…</p>
   else if (!status.moodle_base_url) body = (
     <div className="card"><h2>Falta configuración</h2>
       <p>Define <code>MOODLE_BASE_URL</code> en <code>backend/.env</code> y reinicia el servidor.</p></div>
   )
-  else if (!status.has_credentials || editing) body = (
-    <CredentialsForm initialUser={status.username}
-      onSaved={() => { setEditing(false); load() }}
-      onCancel={status.has_credentials ? () => setEditing(false) : null} />
+  else if (view === 'privacy') body = <Privacy onChanged={load} />
+  else if (loggingIn) body = <LoginProgress onFinished={onLoginFinished} />
+  else if (!status.has_account || !status.has_session || connect.open) body = (
+    <ConnectForm status={status} reason={connect.reason}
+      onStarted={() => setLoggingIn(true)}
+      onCancel={status.has_session ? () => setConnect({ open: false, reason: '' }) : null} />
   )
-  else body = <Courses status={status} onEditCredentials={() => setEditing(true)} onLogout={logout} />
+  else body = <Courses status={status} onNeedLogin={onNeedLogin} />
 
   return (
     <div className="app">
       <header className="topbar">
         <h1>Florida Teacher App</h1>
-        {status?.moodle_base_url && <span className="muted small">{new URL(status.moodle_base_url).host}</span>}
+        {status && !token.need && (
+          <nav className="tabs">
+            <button className={view === 'courses' ? 'tab active' : 'tab'} onClick={() => setView('courses')}>Cursos</button>
+            <button className={view === 'privacy' ? 'tab active' : 'tab'} onClick={() => setView('privacy')}>Privacidad</button>
+            {status.has_session && view === 'courses' && !loggingIn && (
+              <button className="tab" onClick={() => setConnect({ open: true, reason: '' })}>Cuenta</button>
+            )}
+          </nav>
+        )}
       </header>
       <main>{body}</main>
     </div>

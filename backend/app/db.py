@@ -11,7 +11,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS credentials (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     username TEXT NOT NULL,
-    password_enc BLOB NOT NULL,
+    password_enc BLOB,                -- NULL si no se recuerda la contraseña
     updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS courses (
@@ -36,8 +36,23 @@ def now_iso() -> str:
 class Database:
     def __init__(self, path: Path) -> None:
         self.path = path
+        if not path.exists():
+            path.touch(mode=0o600)  # solo el usuario del PC puede leer la BD
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        # v0.1: password_enc era NOT NULL; ahora es opcional.
+        cols = {r["name"]: r for r in conn.execute("PRAGMA table_info(credentials)")}
+        if cols.get("password_enc") is not None and cols["password_enc"]["notnull"]:
+            conn.executescript(
+                "ALTER TABLE credentials RENAME TO credentials_old;"
+                + SCHEMA.split(";")[0] + ";"
+                "INSERT INTO credentials SELECT * FROM credentials_old;"
+                "DROP TABLE credentials_old;"
+            )
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -50,7 +65,7 @@ class Database:
             conn.close()
 
     # --- credenciales -------------------------------------------------
-    def save_credentials(self, username: str, password_enc: bytes) -> None:
+    def save_credentials(self, username: str, password_enc: bytes | None) -> None:
         with self.connect() as conn:
             conn.execute(
                 "INSERT INTO credentials (id, username, password_enc, updated_at) VALUES (1, ?, ?, ?) "
@@ -87,6 +102,19 @@ class Database:
         with self.connect() as conn:
             rows = conn.execute("SELECT * FROM courses ORDER BY fullname COLLATE NOCASE").fetchall()
             return [dict(r) for r in rows]
+
+    def count_courses(self) -> int:
+        with self.connect() as conn:
+            return conn.execute("SELECT COUNT(*) FROM courses").fetchone()[0]
+
+    def wipe(self) -> None:
+        """Borra todos los datos guardados (derecho de supresión)."""
+        with self.connect() as conn:
+            conn.execute("DELETE FROM credentials")
+            conn.execute("DELETE FROM courses")
+            conn.execute("DELETE FROM meta")
+        with self.connect() as conn:
+            conn.execute("VACUUM")  # no dejar restos en páginas libres del archivo
 
     def get_meta(self, key: str) -> str | None:
         with self.connect() as conn:

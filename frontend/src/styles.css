@@ -32,3 +32,23 @@ button.danger { color: var(--danger); }
 .course-name { font-weight: 600; }
 .course-meta { color: var(--muted); font-size: .9rem; }
 code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+h3 { margin: 20px 0 8px; font-size: 1.1rem; }
+.grid { display: grid; gap: 12px; }
+.notice { background: color-mix(in srgb, var(--accent) 10%, transparent); border-radius: 10px; padding: 10px 14px; margin: 0; }
+label.check { display: flex; gap: 12px; align-items: flex-start; font-weight: 400; }
+label.check input { min-height: 0; width: 24px; height: 24px; margin: 2px 0 0; flex: none; accent-color: var(--accent); }
+details summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
+details[open] { display: grid; gap: 10px; }
+.big-number { font-size: 4rem; font-weight: 700; text-align: center; letter-spacing: .1em; margin: 8px 0; color: var(--accent); }
+.spinner::before { content: ''; display: inline-block; width: 16px; height: 16px; margin-right: 10px; vertical-align: -2px;
+  border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.tab { background: transparent; color: var(--text); border: 1px solid var(--border); min-height: 44px; padding: 0 16px; }
+.tab.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.privacy { max-width: 760px; margin: 0 auto; }
+.privacy table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: 12px; overflow: hidden; }
+.privacy th, .privacy td { text-align: left; padding: 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.privacy ul { margin: 0 0 12px; padding-left: 20px; }
+.privacy .row { margin-top: 20px; }
+@media (max-width: 560px) { .privacy th:nth-child(3), .privacy td:nth-child(3) { display: none; } }
