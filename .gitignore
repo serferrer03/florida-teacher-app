@@ -1,0 +1,20 @@
+# Datos sensibles locales: credenciales cifradas, clave, sesión de Moodle
+backend/data/
+backend/.env
+*.db
+secret.key
+storage_state.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+frontend/dev-dist/
+
+.DS_Store
