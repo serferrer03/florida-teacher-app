@@ -7,6 +7,7 @@ if [ ! -d backend/.venv ]; then
   backend/.venv/bin/pip install -r backend/requirements.txt
   backend/.venv/bin/python -m playwright install chromium
 fi
-[ -f backend/.env ] || { cp backend/.env.example backend/.env; echo "Edita backend/.env (MOODLE_BASE_URL) y vuelve a ejecutar."; exit 1; }
+[ -f backend/.env ] || cp backend/.env.example backend/.env
 (cd frontend && { [ -d node_modules ] || npm install; } && npm run build)
-cd backend && exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
+export PORT="${PORT:-8000}"
+cd backend && exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port "$PORT"

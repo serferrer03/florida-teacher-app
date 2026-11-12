@@ -79,15 +79,17 @@ Todas salvo `/api/health` exigen la cabecera `X-App-Token`.
 Requisitos en el PC: Python 3.11+, Node 18+.
 
 0. Lee [PRIVACIDAD.md](PRIVACIDAD.md) y pide el visto bueno a Florida (DPD / informática).
-1. `cp backend/.env.example backend/.env` y define `MOODLE_BASE_URL` (URL de Florida Oberta, sin
-   barra final). `LOGIN_MODE=auto` detecta el botón de Microsoft. Opcional:
-   `MOODLE_HEADLESS=false` para ver el navegador (necesario para el «login manual»).
-2. Arranque rápido: `./start.sh` (Linux/macOS) o `.\start.ps1` (Windows). Crea el entorno virtual,
-   instala Chromium de Playwright, compila la PWA y lanza el servidor en el puerto 8000.
-3. Al arrancar, la consola muestra el **código de acceso**. En la tablet (misma Wi-Fi) abre
-   `http://IP-DEL-PC:8000`, escribe el código, después tu correo institucional y contraseña, y
-   aprueba en Microsoft Authenticator si te lo pide. Permite el puerto 8000 en el firewall del PC
-   solo para redes privadas.
+1. **Windows:** doble clic en `Iniciar.bat`. **Linux/macOS:** `./start.sh`. La primera vez instala
+   dependencias y Chromium, crea `backend/.env` (ya apunta a `https://www.floridaoberta.com`),
+   compila la PWA y, en Windows, crea una regla de firewall solo para redes privadas.
+2. La consola muestra la dirección para la tablet (`http://IP-DEL-PC:8000`) y el **código de
+   acceso**. Ábrela en Chrome de la tablet (misma Wi-Fi), escribe el código, tu correo
+   institucional y contraseña, y aprueba en Microsoft Authenticator si lo pide.
+3. Opcional: `MOODLE_HEADLESS=false` en `backend/.env` para ver el navegador en el PC.
+
+Florida Oberta (`https://www.floridaoberta.com`) usa el botón «Conectar con Office 365»
+(`/auth/oidc/`) que redirige a `login.microsoftonline.com` (inquilino de Grupo Florida);
+comprobado contra la web real.
 
 Desarrollo con recarga en caliente:
 

@@ -120,6 +120,17 @@ def wipe_everything() -> None:
     cipher.reset()  # borrado criptográfico: lo cifrado antes ya no se puede leer
 
 
+def lan_ip() -> str:
+    """IP del PC en la red local (sin enviar nada: UDP connect no transmite paquetes)."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("192.168.1.1", 9))
+            return s.getsockname()[0]
+    except OSError:
+        return "IP-DEL-PC"
+
+
 # ------------------------------------------------------------------- app
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -128,8 +139,10 @@ async def lifespan(_: FastAPI):
         settings.legacy_storage_state_path.unlink()
         log.info("Eliminado estado de sesión antiguo sin cifrar")
     origin = "APP_ACCESS_TOKEN (.env)" if not settings.access_token_generated else "data/access_code"
+    port = os.environ.get("PORT", "8000")
     print(
         "\n================================================================\n"
+        f"  En la tablet abre:  http://{lan_ip()}:{port}\n"
         f"  Código de acceso para la tablet: {settings.access_token}\n"
         f"  (guardado en {origin}; no lo compartas)\n"
         "================================================================\n",

@@ -13,10 +13,10 @@ MY_COURSES_PATH = "/my/courses.php"
 AJAX_SERVICE_PATH = "/lib/ajax/service.php"
 COURSE_VIEW_PATH = "/course/view.php?id={id}"
 
-# --- Botón "Iniciar sesión con Microsoft/Office 365" (auth_oauth2 / saml2) --
+# --- Botón "Iniciar sesión con Microsoft" (Florida Oberta usa auth_oidc -> /auth/oidc/) --
 IDP_BUTTON = (
     "a.login-identityprovider-btn, .potentialidplist a, "
-    "a[href*='/auth/oauth2/login.php'], a[href*='/auth/saml2/login.php']"
+    "a[href*='/auth/oidc/'], a[href*='/auth/oauth2/login.php'], a[href*='/auth/saml2/login.php']"
 )
 
 # --- Formulario de login propio de Moodle (alternativa, LOGIN_MODE=moodle) --

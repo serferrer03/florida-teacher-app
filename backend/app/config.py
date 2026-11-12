@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_MOODLE_URL = "https://www.floridaoberta.com"
 
 
 def _load_dotenv(path: Path) -> None:
@@ -88,7 +89,7 @@ def get_settings() -> Settings:
     token, generated = _access_token(data_dir)
     mode = (os.environ.get("LOGIN_MODE") or "auto").strip().lower()
     return Settings(
-        moodle_base_url=os.environ.get("MOODLE_BASE_URL", "").rstrip("/"),
+        moodle_base_url=(os.environ.get("MOODLE_BASE_URL") or DEFAULT_MOODLE_URL).rstrip("/"),
         headless=_bool(os.environ.get("MOODLE_HEADLESS"), True),
         timeout_ms=int(os.environ.get("MOODLE_TIMEOUT_MS") or 30000),
         data_dir=data_dir,
