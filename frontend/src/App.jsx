@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError, clearToken, getToken, setToken } from './api.js'
 import { CourseDetail } from './Assignments.jsx'
+import { CalendarView } from './Calendar.jsx'
 
 function formatDate(iso) {
   if (!iso) return 'nunca'
@@ -326,6 +327,7 @@ export default function App() {
       <p>Define <code>MOODLE_BASE_URL</code> en <code>backend/.env</code> y reinicia el servidor.</p></div>
   )
   else if (view === 'privacy') body = <Privacy onChanged={load} />
+  else if (view === 'calendar' && status.has_session && !loggingIn && !connect.open) body = <CalendarView onNeedLogin={onNeedLogin} />
   else if (loggingIn) body = <LoginProgress onFinished={onLoginFinished} />
   else if (!status.has_session || connect.open) body = (
     <ConnectForm status={status} reason={connect.reason}
@@ -342,6 +344,7 @@ export default function App() {
         {status && !token.need && (
           <nav className="tabs">
             <button className={view === 'courses' ? 'tab active' : 'tab'} onClick={() => { setView('courses'); setCourse(null) }}>Cursos</button>
+            <button className={view === 'calendar' ? 'tab active' : 'tab'} onClick={() => setView('calendar')}>Calendario</button>
             <button className={view === 'privacy' ? 'tab active' : 'tab'} onClick={() => setView('privacy')}>Privacidad</button>
             {status.has_session && view === 'courses' && !loggingIn && (
               <button className="tab" onClick={() => setConnect({ open: true, reason: '' })}>Cuenta</button>

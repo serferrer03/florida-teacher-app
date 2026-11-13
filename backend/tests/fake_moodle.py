@@ -346,6 +346,13 @@ async function upload() {{
             else:
                 next(s for s in self.sections if s["id"] == args["itemid"])["title"] = args["value"]
             return {"error": False, "data": {}}
+        if method == "core_calendar_get_calendar_monthly_view":
+            import datetime as _dt
+            t = int(_dt.datetime(args["year"], args["month"], 15, 23, 55).timestamp())
+            ev = {"id": 77, "name": "Práctica 1 debe entregarse", "timestart": t, "modulename": "assign",
+                  "normalisedeventtype": "course", "url": "/mod/assign/view.php?id=500",
+                  "course": {"id": 7, "fullname": "Programación DAM 1"}}
+            return {"error": False, "data": {"weeks": [{"days": [{"events": [ev]}, {"events": [ev]}]}]}}
         return {"error": True, "exception": {"errorcode": "invalidparameter", "message": method}}
 
     def resource_form(self, course: int, section: int, mod: str) -> str:

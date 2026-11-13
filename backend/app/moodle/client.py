@@ -505,3 +505,9 @@ class MoodleClient:
         from . import contents
         async with self.session(creds) as page:
             await contents.add_resource(page, self.base, course_id, values, files)
+
+    # ------------------------------------------------ Fase 5: calendario
+    async def calendar_month(self, creds: Credentials | None, year: int, month: int) -> list[dict]:
+        from . import calendar
+        async with self.session(creds) as page:
+            return await calendar.month_events(page, self.base, year, month)

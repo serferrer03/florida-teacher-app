@@ -11,7 +11,7 @@ corre en el PC del profesor y la tablet lo usa como PWA a través de la red loca
 | 2. Creación de tareas (fechas, archivos, restricciones) | ✅ Hecha y validada |
 | 3. Contenidos del curso | ✅ Hecha (pendiente de validar con Florida Oberta real) |
 | 4. Entregas y calificación | ⏭️ Siguiente |
-| 5. Planificación, plantillas y calendario | Pendiente |
+| 5. Planificación, plantillas y calendario | ✅ Hecha (pendiente de validar con Florida Oberta real) |
 | 6. Robustez y usabilidad | Pendiente |
 | 7. Seguridad, empaquetado y publicación | Pendiente |
 
@@ -169,7 +169,15 @@ autorización expresa de Florida, minimización (descargar solo lo necesario y b
 cifrado de lo que se guarde e inventario/borrado en la pestaña *Privacidad*
 (ver [PRIVACIDAD.md](PRIVACIDAD.md) §6).
 
-### 5. Planificación, plantillas y calendario
+### 5. Planificación, plantillas y calendario ✅
+Implementado: plantillas de tarea guardadas en el PC con fechas relativas (+N días a HH:MM),
+crear la misma tarea en varios cursos (sin copiar restricciones de grupo/agrupamiento/nota, que
+son de cada curso) y pestaña «Calendario» mensual con los eventos de Florida Oberta
+(`core_calendar_get_calendar_monthly_view`). API: `GET/POST/DELETE /api/templates`,
+`GET /api/calendar?year=&month=`. Recordatorios con notificaciones quedan para la Fase 6 (requieren
+HTTPS en la tablet).
+
+Alcance original:
 Plantillas de tareas reutilizables, duplicar una tarea en varios cursos/grupos con desplazamiento
 de fechas, vista de calendario de entregas y recordatorios locales.
 

@@ -470,6 +470,40 @@ async def add_resource(course_id: int, data: str = Form(...),
     return {"ok": True}
 
 
+# --------------------------------------- Fase 5: plantillas y calendario
+class TemplateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    data: dict
+
+
+@app.get("/api/templates", dependencies=auth)
+def list_templates() -> dict:
+    return {"templates": [{**t, "data": json.loads(t["data"])} for t in db.list_templates()]}
+
+
+@app.post("/api/templates", dependencies=auth)
+def save_template(body: TemplateIn) -> dict:
+    raw = json.dumps(body.data, ensure_ascii=False)
+    if len(raw) > 50_000:
+        raise HTTPException(413, "Plantilla demasiado grande")
+    return {"id": db.add_template(" ".join(body.name.split()), raw)}
+
+
+@app.delete("/api/templates/{template_id}", dependencies=auth)
+def delete_template(template_id: int) -> dict:
+    if not db.delete_template(template_id):
+        raise HTTPException(404, "Plantilla no encontrada")
+    return {"deleted": True}
+
+
+@app.get("/api/calendar", dependencies=auth)
+async def calendar(year: int, month: int) -> dict:
+    if not (2000 <= year <= 2100 and 1 <= month <= 12):
+        raise HTTPException(422, "Fecha no válida")
+    events = await moodle_call(get_moodle().calendar_month(stored_credentials(), year, month))
+    return {"year": year, "month": month, "events": events}
+
+
 # -------------------------------------------------------------- privacidad
 @app.get("/api/privacy", dependencies=auth)
 def privacy() -> dict:
@@ -492,6 +526,8 @@ def privacy() -> dict:
             {"what": "Registro de tareas creadas desde la app", "stored": db.count_assignments() > 0,
              "detail": f"{db.count_assignments()} tareas (nombre, fecha de entrega, enlace)",
              "protection": "Base de datos local"},
+            {"what": "Plantillas de tareas", "stored": len(db.list_templates()) > 0,
+             "detail": f"{len(db.list_templates())} plantillas (sin datos de alumnado)", "protection": "Base de datos local"},
             {"what": "Archivos adjuntos subidos desde la tablet", "stored": False,
              "detail": "Se borran del PC en cuanto se adjuntan en Florida Oberta", "protection": "Borrado inmediato"},
             {"what": "Lista de tus cursos", "stored": db.count_courses() > 0,

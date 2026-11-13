@@ -132,3 +132,6 @@ RESOURCE_FIELDS = {"name": "id_name", "intro": "id_introeditor", "visible": "id_
 RESOURCE_FILES_FIELD = "files"            # filemanager #fitem_id_files
 URL_FIELD = "id_externalurl"
 RETURN_TO_COURSE_SUBMIT = "#id_submitbutton2"   # "Guardar cambios y regresar al curso"
+
+# ================== FASE 5: CALENDARIO ====================================
+AJAX_CALENDAR_MONTH = "core_calendar_get_calendar_monthly_view"   # vista mensual (todas tus asignaturas)

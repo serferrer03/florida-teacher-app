@@ -54,6 +54,10 @@ export const api = {
     files.forEach((f) => fd.append('files', f, f.name))
     return request('POST', `/api/courses/${courseId}/resources`, fd)
   },
+  templates: () => request('GET', '/api/templates'),
+  saveTemplate: (name, data) => request('POST', '/api/templates', { name, data }),
+  deleteTemplate: (id) => request('DELETE', `/api/templates/${id}`),
+  calendar: (year, month) => request('GET', `/api/calendar?year=${year}&month=${month}`),
   assignments: (courseId) => request('GET', `/api/courses/${courseId}/assignments`),
   createAssignment: (courseId, data, files) => {
     const fd = new FormData()

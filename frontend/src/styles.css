@@ -87,3 +87,11 @@ a.button { display: inline-flex; align-items: center; min-height: 48px; padding:
 .hidden-item > a, .hidden-item > header .expand { opacity: .6; }
 .pad { padding: 10px 14px; margin: 0; }
 button.link:disabled { opacity: .4; }
+.template-bar select { width: auto; flex: 1 1 200px; }
+.calendar .day { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 10px; }
+.calendar .day h3 { margin: 0; padding: 10px 14px; font-size: 1rem; text-transform: capitalize; border-bottom: 1px solid var(--border); }
+.calendar .day.today { border-color: var(--accent); }
+.calendar .day.today h3 { color: var(--accent); }
+.calendar .day.past { opacity: .6; }
+.calendar .time { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 3.2em; }
+.grow { flex: 1 1 260px; padding: 8px 0; }

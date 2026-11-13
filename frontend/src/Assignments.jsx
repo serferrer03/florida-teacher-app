@@ -29,6 +29,40 @@ function defaults() {
   }
 }
 
+// Plantillas: las fechas se guardan relativas a hoy (+N días a HH:MM)
+const DATE_KEYS = ['allow_from', 'due', 'cutoff', 'grading_due']
+function toRelative(v) {
+  if (!v) return null
+  const d = new Date(v); const t = new Date(); t.setHours(0, 0, 0, 0)
+  const day = new Date(d); day.setHours(0, 0, 0, 0)
+  return { days: Math.round((day - t) / 86400000), time: v.slice(11, 16) }
+}
+function fromRelative(rel) {
+  if (!rel) return ''
+  const [h, m] = rel.time.split(':').map(Number)
+  return daysFromNow(rel.days, h, m)
+}
+function formToTemplate(f) {
+  const { name, description, show_description, section, visible, use, online_text, file_submissions,
+    max_files, max_size_bytes, grade_max, r } = f
+  return {
+    name, description, show_description, section, visible, use, online_text, file_submissions,
+    max_files, max_size_bytes, grade_max,
+    rel: Object.fromEntries(DATE_KEYS.map((k) => [k, toRelative(f[k])])),
+    r: { use_from: r.use_from, from: toRelative(r.date_from), use_until: r.use_until, until: toRelative(r.date_until),
+      show_to_students: r.show_to_students },
+  }
+}
+function templateToForm(t) {
+  const base = defaults()
+  const dates = Object.fromEntries(DATE_KEYS.map((k) => [k, fromRelative(t.rel?.[k]) || base[k]]))
+  return {
+    ...base, ...t, ...dates, use: { ...base.use, ...t.use },
+    r: { ...base.r, use_from: !!t.r?.use_from, date_from: fromRelative(t.r?.from), use_until: !!t.r?.use_until,
+      date_until: fromRelative(t.r?.until), show_to_students: t.r?.show_to_students ?? true },
+  }
+}
+
 const DATE_LABELS = {
   allow_from: 'Permitir entregas desde',
   due: 'Fecha de entrega',
@@ -79,6 +113,37 @@ function AssignmentForm({ course, options, onCreated, onCancel, onNeedLogin }) {
   const setR = (patch) => setF((o) => ({ ...o, r: { ...o.r, ...patch } }))
   const setUse = (k, v) => setF((o) => ({ ...o, use: { ...o.use, [k]: v } }))
   const payload = useMemo(() => toPayload(f), [f])
+  const [templates, setTemplates] = useState([])
+  const [allCourses, setAllCourses] = useState([])
+  const [extra, setExtra] = useState([])   // otros cursos donde crear la misma tarea
+  const [progress, setProgress] = useState('')
+  useEffect(() => {
+    api.templates().then((d) => setTemplates(d.templates)).catch(() => {})
+    api.courses().then((d) => setAllCourses(d.courses.filter((c) => c.id !== course.id))).catch(() => {})
+  }, [course.id])
+
+  function applyTemplate(id) {
+    const t = templates.find((x) => String(x.id) === id)
+    if (!t) return
+    const form = templateToForm(t.data)
+    if (!options.sections.some((s) => s.number === Number(form.section))) form.section = 0
+    setF(form)
+  }
+  async function saveTemplate() {
+    const name = window.prompt('Nombre de la plantilla:', f.name)
+    if (!name) return
+    try {
+      await api.saveTemplate(name, formToTemplate(f))
+      setTemplates((await api.templates()).templates)
+      window.alert('Plantilla guardada. Las fechas se guardan relativas a hoy.')
+    } catch (err) { setError(err.message) }
+  }
+  async function deleteTemplate(id) {
+    const t = templates.find((x) => String(x.id) === id)
+    if (!t || !window.confirm(`¿Borrar la plantilla «${t.name}»?`)) return
+    await api.deleteTemplate(t.id).catch((e) => setError(e.message))
+    setTemplates((await api.templates()).templates)
+  }
   const names = (list, ids) => list.filter((x) => ids.includes(x.id)).map((x) => x.name)
 
   function review(e) {
@@ -90,12 +155,27 @@ function AssignmentForm({ course, options, onCreated, onCancel, onNeedLogin }) {
 
   async function send() {
     setStep('sending'); setError('')
+    let main
     try {
-      onCreated(await api.createAssignment(course.id, payload, files))
+      setProgress(course.fullname)
+      main = await api.createAssignment(course.id, payload, files)
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) { onNeedLogin(err.message); return }
-      setError(err.message); setStep('review')
+      setError(err.message); setStep('review'); return
     }
+    // Otros cursos: grupos, agrupamientos y notas son de cada curso, así que esas restricciones no se copian
+    const generic = { ...payload, restrictions: { ...payload.restrictions, group_ids: [], grouping_id: null, grade: null } }
+    const others = []
+    for (const c of allCourses.filter((x) => extra.includes(x.id))) {
+      setProgress(c.fullname)
+      try {
+        const res = await api.createAssignment(c.id, generic, files)
+        others.push({ course: c.fullname, url: res.url })
+      } catch (err) {
+        others.push({ course: c.fullname, error: err.message })
+      }
+    }
+    onCreated({ ...main, others })
   }
 
   const sectionName = options.sections.find((s) => s.number === Number(f.section))?.name
@@ -116,6 +196,8 @@ function AssignmentForm({ course, options, onCreated, onCancel, onNeedLogin }) {
             payload.file_submissions && `Archivos (máx. ${payload.max_files}, ${sizeLabel || 'límite del curso'})`].filter(Boolean).join(' · ')}</dd>
           <dt>Calificación</dt><dd>{payload.grade_max > 0 ? `Sobre ${payload.grade_max}` : 'Sin calificación'}</dd>
           <dt>Archivos adjuntos</dt><dd>{files.length ? files.map((x) => x.name).join(', ') : 'Ninguno'}</dd>
+          {extra.length > 0 && <><dt>También en</dt><dd>{allCourses.filter((c) => extra.includes(c.id)).map((c) => c.fullname).join(', ')}
+            {(r.group_ids.length > 0 || r.grouping_id || r.grade) && <div className="muted small">(en esos cursos sin las restricciones de grupo/nota)</div>}</dd></>}
           <dt>Restricciones</dt>
           <dd>{[r.date_from && `desde ${show(r.date_from)}`, r.date_until && `hasta ${show(r.date_until)}`,
             r.group_ids.length && `grupo: ${names(options.groups, r.group_ids).join(' o ')}`,
@@ -125,7 +207,7 @@ function AssignmentForm({ course, options, onCreated, onCancel, onNeedLogin }) {
         </dl>
         {error && <p className="error" role="alert">{error}</p>}
         {step === 'sending'
-          ? <p className="spinner">Creando la tarea en Florida Oberta{files.length ? ' y subiendo archivos' : ''}… puede tardar un poco.</p>
+          ? <p className="spinner">Creando la tarea en «{progress}»{files.length ? ' y subiendo archivos' : ''}… puede tardar un poco.</p>
           : (
             <div className="row">
               <button onClick={send}>Crear tarea en Florida Oberta</button>
@@ -139,6 +221,19 @@ function AssignmentForm({ course, options, onCreated, onCancel, onNeedLogin }) {
   return (
     <form className="card wide" onSubmit={review}>
       <h2>Nueva tarea · {course.fullname}</h2>
+      <div className="row template-bar">
+        <select defaultValue="" onChange={(e) => { applyTemplate(e.target.value); e.target.value = '' }} aria-label="Cargar plantilla">
+          <option value="" disabled>{templates.length ? 'Cargar plantilla…' : 'Sin plantillas guardadas'}</option>
+          {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <button type="button" className="secondary" onClick={saveTemplate}>Guardar como plantilla</button>
+        {templates.length > 0 && (
+          <select defaultValue="" onChange={(e) => { deleteTemplate(e.target.value); e.target.value = '' }} aria-label="Borrar plantilla">
+            <option value="" disabled>Borrar plantilla…</option>
+            {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        )}
+      </div>
 
       <fieldset>
         <legend>General</legend>
@@ -259,6 +354,20 @@ function AssignmentForm({ course, options, onCreated, onCancel, onNeedLogin }) {
         </fieldset>
       )}
 
+      {allCourses.length > 0 && (
+        <fieldset>
+          <legend>Crear también en otros cursos</legend>
+          <div className="chips">
+            {allCourses.map((c) => (
+              <label key={c.id} className="check chip"><input type="checkbox" checked={extra.includes(c.id)}
+                onChange={(e) => setExtra(e.target.checked ? [...extra, c.id] : extra.filter((x) => x !== c.id))} />
+                <span>{c.fullname}</span></label>
+            ))}
+          </div>
+          <p className="muted small">Se crea con los mismos datos y archivos, en el tema con el mismo número. Las restricciones de grupo, agrupamiento y nota no se copian.</p>
+        </fieldset>
+      )}
+
       {error && <p className="error" role="alert">{error}</p>}
       <div className="row">
         <button type="submit">Revisar</button>
@@ -317,6 +426,15 @@ export function CourseDetail({ course, onBack, onNeedLogin }) {
         <div className="card wide">
           <h2>✅ Tarea creada</h2>
           <p>«{created.name}» ya está en Florida Oberta.</p>
+          {created.others?.length > 0 && (
+            <ul className="files">
+              {created.others.map((o) => (
+                <li key={o.course}>{o.error
+                  ? <span className="error">{o.course}: {o.error}</span>
+                  : <a href={o.url} target="_blank" rel="noreferrer noopener">{o.course} ↗</a>}</li>
+              ))}
+            </ul>
+          )}
           <p className="muted small">Revisa la primera vez en Florida Oberta que fechas, archivos y restricciones son correctos.</p>
           <div className="row">
             <a className="button" href={created.url} target="_blank" rel="noreferrer noopener">Ver en Florida Oberta ↗</a>
