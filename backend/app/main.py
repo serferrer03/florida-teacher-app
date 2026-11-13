@@ -232,6 +232,7 @@ async def login_start(body: LoginIn) -> dict:
             db.replace_courses(await moodle.list_courses(creds))
         except MoodleError as exc:
             info["courses_error"] = str(exc)
+            log.warning("Login correcto pero falló la descarga de cursos: %s", exc)
         return info
 
     return jobs.start(work, error_message).to_dict()
