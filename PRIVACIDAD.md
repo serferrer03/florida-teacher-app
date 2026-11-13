@@ -33,7 +33,7 @@ Florida y siguiendo sus instrucciones. Por eso:
 | Tu contraseña | `app.db` | **Solo si marcas «Recordar contraseña»**. Cifrada (Fernet: AES-128 + HMAC-SHA256) | Hasta «Cerrar sesión» o «Borrar todos mis datos» |
 | Cookies de sesión de Moodle y Microsoft | `backend/data/session.enc` | Cifradas (Fernet) | Se borran solas a los `SESSION_MAX_DAYS` días (14 por defecto) |
 | Lista de tus cursos (nombre, código, categoría, enlace) | `app.db` | Archivo solo legible por tu usuario del PC | Se sustituye en cada sincronización |
-| Clave de cifrado | `backend/data/secret.key` | Permisos 600 | Se destruye con «Borrar todos mis datos» |
+| Clave de cifrado | Llavero del sistema (Administrador de credenciales de Windows); si no hay, `backend/data/secret.key` | Permisos 600 | Se destruye con «Borrar todos mis datos» |
 | Código de acceso de la tablet | `backend/data/access_code` y en la tablet | Permisos 600 | Hasta que lo cambies |
 
 **No se tratan** en la Fase 1: datos del alumnado, códigos de verificación de Microsoft (se usan
@@ -63,6 +63,15 @@ tiene servidor en Internet: todo ocurre entre tu tablet, tu PC, Florida Oberta y
   sesión* borra cookies y contraseña; *Borrar todos mis datos* borra todo y destruye la clave de
   cifrado (lo cifrado antes queda irrecuperable).
 
+- **Conexión cifrada (HTTPS)** entre tablet y PC con un certificado propio que solo vale para la
+  red local. Instálalo en la tablet desde *Privacidad → Conexión segura*; después puedes poner
+  `HTTP_LAN=false` en `backend/.env` para que el PC no acepte conexiones sin cifrar desde la red.
+- **Diagnóstico desactivado por defecto.** Si lo activas (`DIAGNOSTICS=true`) guarda capturas de
+  pantalla de los errores en `backend/data/diagnostics/` durante 7 días; nunca de las pantallas de
+  entregas y notas. Revisa y tapa datos antes de enviar una captura a nadie.
+- **Copia de seguridad** (Privacidad → Copia de seguridad): solo plantillas y registro de tareas, sin
+  contraseñas, sesiones ni datos del alumnado.
+
 ## 4. Lo que te toca a ti (medidas organizativas)
 
 - [ ] Autorización de Florida (sección 1).
@@ -73,15 +82,16 @@ tiene servidor en Internet: todo ocurre entre tu tablet, tu PC, Florida Oberta y
       firewall, permite el puerto 8000 solo en redes privadas. No lo abras a Internet (ni
       redirección de puertos en el router).
 - [ ] No copiar `backend/data/` a USB, nubes personales ni repositorios (está en `.gitignore`).
-- [ ] No compartir el código de acceso de la tablet.
+- [ ] No compartir el código de acceso de la tablet (si lo sospechas: *Privacidad → Cambiar código de acceso*).
+- [ ] Instalar el certificado HTTPS en la tablet y usar la dirección `https://…:8443`.
 
 ## 5. Si pierdes el PC o la tablet, o sospechas un acceso indebido
 
 1. Desde otro dispositivo, **cambia la contraseña de Microsoft** y cierra todas las sesiones
    (Cuenta de Microsoft → Seguridad → cerrar sesión en todas partes / «Mis inicios de sesión»).
 2. Si conservas el PC: pestaña *Privacidad* → *Borrar todos mis datos*, o borra `backend/data/`.
-   Si perdiste la tablet: borra `backend/data/access_code` y reinicia el servidor (se genera un
-   código nuevo y la tablet perdida deja de tener acceso).
+   Si perdiste la tablet: *Privacidad → Cambiar código de acceso* (la tablet perdida deja de tener
+   acceso) y quita la app de la lista de dispositivos de confianza si la tenías.
 3. **Avisa cuanto antes al DPD de Florida.** Si hubiera datos personales afectados, el responsable
    (Florida) debe valorar la notificación a la autoridad de control en un plazo de 72 horas
    (art. 33 RGPD), y para eso necesita saberlo enseguida.

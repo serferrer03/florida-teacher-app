@@ -303,8 +303,29 @@ class MoodleClient:
         raise MoodleLoginError("Se agotó el tiempo para completar el inicio de sesión")
 
     # ------------------------------------------------------------ sesiones
+    async def _snapshot(self, page: Page, error: BaseException) -> None:
+        """Diagnóstico (DIAGNOSTICS=true): captura + ruta de la página. Se borra a los 7 días."""
+        if not self.settings.diagnostics or page.is_closed():
+            return
+        import datetime as dt
+        import shutil
+        import time as _time
+        root = self.settings.data_dir / "diagnostics"
+        for old in root.glob("*") if root.exists() else []:
+            if _time.time() - old.stat().st_mtime > 7 * 86400:
+                shutil.rmtree(old, ignore_errors=True)
+        folder = root / dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            await page.screenshot(path=str(folder / "pantalla.png"), full_page=True)
+            (folder / "info.txt").write_text(
+                f"pagina: {urlparse(page.url).path}\nerror: {type(error).__name__}: {error}\n", encoding="utf-8")
+            log.info("Diagnóstico guardado en %s", folder)
+        except PlaywrightError:
+            pass
+
     @asynccontextmanager
-    async def session(self, creds: Credentials | None) -> AsyncIterator[Page]:
+    async def session(self, creds: Credentials | None, diagnose: bool = True) -> AsyncIterator[Page]:
         """Página con sesión iniciada. Reintenta en silencio; si hace falta MFA, MoodleAuthRequired."""
         if self._interactive:
             raise MoodleBusy("Hay un inicio de sesión en curso; termínalo primero")
@@ -327,12 +348,20 @@ class MoodleClient:
                 yield page
                 await self._save_state(context)
             except PlaywrightTimeout as exc:
+                if diagnose:
+                    await self._snapshot(page, exc)
                 await self._close_browser()
                 raise MoodleError("Florida Oberta tardó demasiado en responder") from exc
             except PlaywrightError as exc:
                 log.warning("Error de navegador (%s)", type(exc).__name__)  # sin URLs ni datos personales
+                if diagnose:
+                    await self._snapshot(page, exc)
                 await self._close_browser()
                 raise MoodleError("Error del navegador al hablar con Florida Oberta") from exc
+            except MoodleError as exc:
+                if diagnose and not isinstance(exc, (MoodleAuthRequired, MoodleBusy)):
+                    await self._snapshot(page, exc)
+                raise
             finally:
                 if self._ctx is not None and not page.is_closed():
                     await page.close()
@@ -515,16 +544,16 @@ class MoodleClient:
     # ------------------------------------- Fase 4: entregas y calificación
     async def submissions(self, creds: Credentials | None, cmid: int) -> list[dict]:
         from . import grading
-        async with self.session(creds) as page:
+        async with self.session(creds, diagnose=False) as page:
             return await grading.list_submissions(page, self.base, cmid)
 
     async def save_grade(self, creds: Credentials | None, cmid: int, userid: int, grade: float | None,
                          feedback: str | None, notify: bool) -> None:
         from . import grading
-        async with self.session(creds) as page:
+        async with self.session(creds, diagnose=False) as page:
             await grading.save_grade(page, self.base, cmid, userid, grade, feedback, notify)
 
     async def submission_file(self, creds: Credentials | None, url: str) -> tuple[bytes, str]:
         from . import grading
-        async with self.session(creds) as page:
+        async with self.session(creds, diagnose=False) as page:
             return await grading.fetch_file(page, self.base, url)

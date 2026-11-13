@@ -46,7 +46,7 @@ log = logging.getLogger("app")
 
 settings = get_settings()
 db = Database(settings.db_path)
-cipher = CredentialCipher(settings.key_path)
+cipher = CredentialCipher(settings.key_path, use_keyring=os.environ.get("KEY_STORAGE", "auto") != "file")
 store = SessionStore(settings.session_path, cipher, settings.session_max_days)
 jobs = LoginJobs()
 _moodle: MoodleClient | None = None
@@ -63,6 +63,7 @@ def get_moodle() -> MoodleClient:
 
 
 # --------------------------------------------------------------- acceso LAN
+ACCESS = {"token": settings.access_token}  # puede cambiarse con /api/access/rotate
 MAX_FAILS, LOCK_SECONDS = 5, 300
 _fails: dict[str, list[float]] = defaultdict(list)
 
@@ -77,7 +78,7 @@ def require_token(request: Request, x_app_token: str | None = Header(default=Non
         raise HTTPException(429, "Demasiados intentos con un código incorrecto. Espera 5 minutos.")
     if not x_app_token:
         raise HTTPException(401, "Falta el código de acceso")  # tablet sin vincular: no penaliza
-    if not hmac.compare_digest(x_app_token.encode(), settings.access_token.encode()):
+    if not hmac.compare_digest(x_app_token.encode(), ACCESS["token"].encode()):
         recent.append(now)
         log.warning("Código de acceso incorrecto desde %s", ip)
         raise HTTPException(401, "Código de acceso incorrecto")
@@ -131,17 +132,6 @@ async def wipe_everything() -> None:
     cipher.reset()  # borrado criptográfico: lo cifrado antes ya no se puede leer
 
 
-def lan_ip() -> str:
-    """IP del PC en la red local (sin enviar nada: UDP connect no transmite paquetes)."""
-    import socket
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("192.168.1.1", 9))
-            return s.getsockname()[0]
-    except OSError:
-        return "IP-DEL-PC"
-
-
 # ------------------------------------------------------------------- app
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -149,22 +139,12 @@ async def lifespan(_: FastAPI):
     if settings.legacy_storage_state_path.exists():
         settings.legacy_storage_state_path.unlink()
         log.info("Eliminado estado de sesión antiguo sin cifrar")
-    origin = "APP_ACCESS_TOKEN (.env)" if not settings.access_token_generated else "data/access_code"
-    port = os.environ.get("PORT", "8000")
-    print(
-        "\n================================================================\n"
-        f"  En la tablet abre:  http://{lan_ip()}:{port}\n"
-        f"  Código de acceso para la tablet: {settings.access_token}\n"
-        f"  (guardado en {origin}; no lo compartas)\n"
-        "================================================================\n",
-        flush=True,
-    )
     yield
     if _moodle is not None:
         await _moodle.close()
 
 
-app = FastAPI(title="Florida Teacher App", version="0.2.0", lifespan=lifespan,
+app = FastAPI(title="Florida Teacher App", version="1.0.0", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 
 
@@ -548,6 +528,69 @@ async def calendar(year: int, month: int) -> dict:
     return {"year": year, "month": month, "events": events}
 
 
+# ------------------------------------------- Fase 6: HTTPS y diagnóstico
+@app.get("/ca.crt", include_in_schema=False)
+def ca_certificate() -> Response:
+    """Certificado PÚBLICO de la CA local, para instalarlo en la tablet (no es secreto)."""
+    path = settings.data_dir / "tls" / "ca.crt"
+    if not path.exists():
+        raise HTTPException(404, "HTTPS no está activado (arranca con run.py / Iniciar.bat)")
+    return Response(path.read_bytes(), media_type="application/x-x509-ca-cert",
+                    headers={"Content-Disposition": 'attachment; filename="florida-teacher-app-ca.crt"'})
+
+
+@app.get("/api/connection", dependencies=auth)
+def connection(request: Request) -> dict:
+    from .tls import lan_ip
+    https_port = int(os.environ.get("HTTPS_PORT") or 8443)
+    return {
+        "secure": request.url.scheme == "https",
+        "https_available": (settings.data_dir / "tls" / "ca.crt").exists(),
+        "https_url": f"https://{lan_ip()}:{https_port}",
+        "diagnostics": settings.diagnostics,
+    }
+
+
+# ----------------------------------------- Fase 7: código de acceso y copias
+@app.post("/api/access/rotate", dependencies=auth)
+def rotate_access_code() -> dict:
+    """Genera un código nuevo: todos los dispositivos (también uno perdido) quedan desvinculados."""
+    if not settings.access_token_generated:
+        raise HTTPException(409, "El código está fijado en backend/.env (APP_ACCESS_TOKEN): cámbialo allí")
+    from .config import new_access_code
+    ACCESS["token"] = new_access_code(settings.data_dir)
+    log.info("Código de acceso cambiado")
+    return {"code": ACCESS["token"]}
+
+
+class BackupIn(BaseModel):
+    templates: list[TemplateIn] = Field(default_factory=list, max_length=500)
+
+
+@app.get("/api/backup", dependencies=auth)
+def export_backup() -> Response:
+    """Copia de seguridad SIN datos sensibles: plantillas y registro de tareas creadas."""
+    data = {
+        "app": "florida-teacher-app", "version": 1, "exported_at": now_iso(),
+        "templates": [{"name": t["name"], "data": json.loads(t["data"])} for t in db.list_templates()],
+        "assignments": [a for c in db.list_courses() for a in db.list_assignments(c["id"])],
+    }
+    return Response(json.dumps(data, ensure_ascii=False, indent=1), media_type="application/json",
+                    headers={"Content-Disposition": 'attachment; filename="florida-teacher-app-copia.json"'})
+
+
+@app.post("/api/backup", dependencies=auth)
+def import_backup(body: BackupIn) -> dict:
+    existing = {(t["name"], t["data"]) for t in db.list_templates()}
+    added = 0
+    for t in body.templates:
+        raw = json.dumps(t.data, ensure_ascii=False)
+        if (t.name, raw) not in existing and len(raw) <= 50_000:
+            db.add_template(" ".join(t.name.split()), raw)
+            added += 1
+    return {"templates_added": added}
+
+
 # -------------------------------------------------------------- privacidad
 @app.get("/api/privacy", dependencies=auth)
 def privacy() -> dict:
@@ -563,7 +606,7 @@ def privacy() -> dict:
             {"what": "Usuario de Florida Oberta", "stored": bool(creds), "detail": creds["username"] if creds else None,
              "protection": "Base de datos local"},
             {"what": "Contraseña", "stored": bool(creds and creds["password_enc"] is not None),
-             "detail": "Solo si marcaste «Recordar contraseña»", "protection": "Cifrada (Fernet/AES)"},
+             "detail": "Solo si marcaste «Recordar contraseña»", "protection": f"Cifrada (Fernet/AES). Clave: {cipher.storage}"},
             {"what": "Cookies de sesión (Moodle y Microsoft)", "stored": store.exists(),
              "detail": f"Guardada {session_age}; se borra sola a los {settings.session_max_days} días" if session_age else None,
              "protection": "Cifradas (Fernet/AES)"},

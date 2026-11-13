@@ -6,6 +6,8 @@ if [ ! -d backend/.venv ]; then
   python3 -m venv backend/.venv
   backend/.venv/bin/pip install -r backend/requirements.txt
   backend/.venv/bin/python -m playwright install chromium
+else
+  backend/.venv/bin/pip install -q -r backend/requirements.txt
 fi
 [ -f backend/.env ] || cp backend/.env.example backend/.env
 (cd frontend && { [ -d node_modules ] || npm install; } && npm run build)
@@ -14,4 +16,4 @@ export PORT="${PORT:-8000}"
   code=$(sed -n 's/^APP_ACCESS_TOKEN=\(..*\)$/\1/p' backend/.env); [ -n "$code" ] || code=$(cat backend/data/access_code 2>/dev/null)
   url="http://localhost:$PORT/#code=$code"
   (command -v xdg-open >/dev/null && xdg-open "$url" || open "$url") >/dev/null 2>&1 ) &
-cd backend && exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port "$PORT"
+cd backend && exec .venv/bin/python run.py

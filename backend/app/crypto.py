@@ -7,6 +7,8 @@ activa el cifrado de disco (BitLocker / FileVault / LUKS).
 """
 from __future__ import annotations
 
+import hashlib
+import logging
 import os
 from pathlib import Path
 
@@ -23,12 +25,53 @@ def write_private(path: Path, data: bytes) -> None:
     os.replace(tmp, path)
 
 
+log = logging.getLogger(__name__)
+KEYRING_SERVICE = "florida-teacher-app"
+
+
+def _system_keyring():
+    """Llavero del sistema (Administrador de credenciales de Windows, Llavero de macOS,
+    Secret Service en Linux) o None si no hay ninguno utilizable."""
+    try:
+        import keyring
+        from keyring.backends import fail
+    except ImportError:
+        return None
+    kr = keyring.get_keyring()
+    if isinstance(kr, fail.Keyring) or getattr(kr, "priority", 0) < 1:
+        return None
+    return kr
+
+
 class CredentialCipher:
-    def __init__(self, key_path: Path) -> None:
+    def __init__(self, key_path: Path, use_keyring: bool = False) -> None:
         self._key_path = key_path
+        self._kr = _system_keyring() if use_keyring else None
+        # una entrada por carpeta de datos (varias instalaciones no se pisan)
+        self._account = "clave-" + hashlib.sha256(str(key_path.parent.resolve()).encode()).hexdigest()[:16]
         self._fernet = Fernet(self._load_or_create_key())
 
+    @property
+    def storage(self) -> str:
+        return "Llavero del sistema" if self._kr else f"Archivo {self._key_path.name} (permisos 600)"
+
     def _load_or_create_key(self) -> bytes:
+        if self._kr is not None:
+            try:
+                stored = self._kr.get_password(KEYRING_SERVICE, self._account)
+                if stored:
+                    self._key_path.unlink(missing_ok=True)
+                    return stored.encode()
+                key = (self._key_path.read_bytes().strip() if self._key_path.exists()
+                       else Fernet.generate_key())
+                self._kr.set_password(KEYRING_SERVICE, self._account, key.decode())
+                if self._kr.get_password(KEYRING_SERVICE, self._account) == key.decode():
+                    self._key_path.unlink(missing_ok=True)  # migrada al llavero
+                    log.info("Clave de cifrado guardada en el llavero del sistema")
+                    return key
+            except Exception:  # noqa: BLE001 - cualquier fallo del llavero -> archivo
+                log.warning("Llavero del sistema no disponible: la clave se guarda en archivo")
+            self._kr = None
         if self._key_path.exists():
             return self._key_path.read_bytes().strip()
         key = Fernet.generate_key()
@@ -37,6 +80,11 @@ class CredentialCipher:
 
     def reset(self) -> None:
         """Destruye la clave y crea otra: lo cifrado antes queda irrecuperable."""
+        if self._kr is not None:
+            try:
+                self._kr.delete_password(KEYRING_SERVICE, self._account)
+            except Exception:  # noqa: BLE001
+                pass
         self._key_path.unlink(missing_ok=True)
         self._fernet = Fernet(self._load_or_create_key())
 

@@ -108,3 +108,6 @@ button.link:disabled { opacity: .4; }
 .gradebox label:first-child { width: 120px; }
 .gradebox .grow { flex: 1 1 240px; }
 .gradebox label:first-child input { width: 100%; }
+.offline { background: #b54708; color: #fff; padding: 10px 14px; border-radius: 10px; margin: 0 0 12px; }
+.steps ol { padding-left: 20px; display: grid; gap: 8px; }
+label.button.secondary { display: inline-flex; align-items: center; min-height: 48px; padding: 0 20px; border-radius: 10px; border: 1px solid var(--border); font-weight: 600; cursor: pointer; }

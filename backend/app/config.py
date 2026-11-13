@@ -42,6 +42,7 @@ class Settings:
     login_timeout_s: int       # tiempo máximo para completar el login (incluida la MFA)
     ms_stay_signed_in: bool    # responder "Sí" a "¿Mantener la sesión iniciada?"
     session_max_days: int      # caducidad local de la sesión cifrada
+    diagnostics: bool          # capturas de pantalla cuando algo falla (nunca con datos del alumnado)
 
     @property
     def db_path(self) -> Path:
@@ -69,12 +70,20 @@ def _access_token(data_dir: Path) -> tuple[str, bool]:
     path = data_dir / "access_code"
     if path.exists():
         return path.read_text(encoding="utf-8").strip(), True
+    return new_access_code(data_dir), True
+
+
+def new_access_code(data_dir: Path) -> str:
+    """Genera y guarda (permisos 600) un código de acceso aleatorio de 10 caracteres."""
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # sin 0/O ni 1/I
     code = "".join(secrets.choice(alphabet) for _ in range(10))
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    path = data_dir / "access_code"
+    tmp = path.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(code)
-    return code, True
+    os.replace(tmp, path)
+    return code
 
 
 @lru_cache
@@ -100,4 +109,5 @@ def get_settings() -> Settings:
         login_timeout_s=int(os.environ.get("LOGIN_TIMEOUT_S") or 180),
         ms_stay_signed_in=_bool(os.environ.get("MS_STAY_SIGNED_IN"), True),
         session_max_days=int(os.environ.get("SESSION_MAX_DAYS") or 14),
+        diagnostics=_bool(os.environ.get("DIAGNOSTICS"), False),
     )

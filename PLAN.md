@@ -12,8 +12,8 @@ corre en el PC del profesor y la tablet lo usa como PWA a través de la red loca
 | 3. Contenidos del curso | ✅ Hecha (pendiente de validar con Florida Oberta real) |
 | 4. Entregas y calificación | ✅ Hecha (pendiente de validar con Florida Oberta real) |
 | 5. Planificación, plantillas y calendario | ✅ Hecha (pendiente de validar con Florida Oberta real) |
-| 6. Robustez y usabilidad | ⏭️ Siguiente |
-| 7. Seguridad, empaquetado y publicación | Pendiente |
+| 6. Robustez y usabilidad | ✅ Hecha |
+| 7. Seguridad, empaquetado y publicación | ✅ Hecha |
 
 ## Arquitectura
 
@@ -190,12 +190,33 @@ Alcance original:
 Plantillas de tareas reutilizables, duplicar una tarea en varios cursos/grupos con desplazamiento
 de fechas, vista de calendario de entregas y recordatorios locales.
 
-### 6. Robustez y usabilidad
+### 6. Robustez y usabilidad ✅
+Implementado: `backend/run.py` sirve HTTP (8000) y **HTTPS (8443)** a la vez. HTTPS usa una CA local
+(`backend/app/tls.py`, `data/tls/`) limitada con *Name Constraints* a `localhost` y a IPs privadas,
+de modo que su clave no sirve para suplantar webs de Internet; el certificado del servidor se
+renueva si cambia la IP del PC. Instalando el certificado público (`/ca.crt`) en la tablet, la PWA
+funciona completa (service worker, instalación). `HTTP_LAN=false` deja el HTTP solo para el propio
+PC. Aviso de «sin conexión» en la app. Diagnóstico opcional (`DIAGNOSTICS=true`): captura y ruta de
+la página cuando una operación falla, en `data/diagnostics/`, borrado a los 7 días y **nunca** en
+las pantallas de entregas/notas. Recuperación de sesión, reintentos de login y selectores
+centralizados ya estaban de fases anteriores.
+
+Alcance original:
 Modo offline de la PWA (lectura de datos cacheados), HTTPS local asistido, recuperación de sesión
 caducada, reintentos, diagnóstico de selectores (captura de pantalla + HTML cuando algo falla),
 accesibilidad y ajustes para tablet.
 
-### 7. Seguridad, empaquetado y publicación
+### 7. Seguridad, empaquetado y publicación ✅
+Implementado: clave de cifrado en el **llavero del sistema** (Administrador de credenciales de
+Windows; migración automática desde `secret.key`; `KEY_STORAGE=file` para desactivarlo), **cambio
+del código de acceso** (desvincula todos los dispositivos), **copia de seguridad** sin datos
+sensibles (plantillas y registro de tareas; `GET/POST /api/backup`), `Actualizar.bat` (git pull +
+dependencias + compilación), `Inicio-automatico.bat` (activa/desactiva el arranque minimizado al
+iniciar sesión), dependencias revisadas en cada arranque, reglas de firewall solo para redes
+privadas, pruebas automáticas (pytest + Playwright contra Moodle/Microsoft simulados) y CI en
+GitHub Actions. Revisión de seguridad: ver la sección «Seguridad» más abajo.
+
+Alcance original:
 Autenticación local robusta (emparejamiento de dispositivos), gestión de la clave (keyring del
 sistema), copias de seguridad, más pruebas automatizadas, arranque como servicio/instalador en el
 PC y revisión de seguridad.
@@ -211,3 +232,19 @@ PC y revisión de seguridad.
 - Quien tenga acceso a `backend/data/` en el PC (con tu usuario) puede descifrar la sesión y la
   contraseña recordada: activa el cifrado de disco. Guardar la clave en el llavero del sistema
   queda para la Fase 7.
+
+## Seguridad (revisión de la Fase 7)
+
+- Toda la API exige el código de acceso (salvo `/api/health` y el certificado público `/ca.crt`);
+  5 fallos por IP → bloqueo 5 min; código rotable desde la app.
+- Sin CORS, CSP restrictiva, `X-Frame-Options: DENY`, `no-store` en la API, sin docs públicas.
+- Secretos: contraseña (opcional) y cookies cifradas con Fernet; clave en el llavero del sistema;
+  archivos de datos con permisos 600 / carpeta 700; nada sensible en Git ni en las copias.
+- Datos del alumnado sin persistencia (PRIVACIDAD.md §6); descargas sin escribir en disco y solo de
+  URLs `pluginfile.php/…/assignsubmission_file/` del propio Florida Oberta.
+- Entradas validadas (pydantic): fechas, tamaños (100 MB/archivo, 20 archivos), URLs solo http(s),
+  nombres de archivo saneados; HTML de descripciones/comentarios escapado.
+- MFA de Microsoft nunca se automatiza; cada cambio en Florida Oberta pide confirmación.
+- Riesgos aceptados: el servidor HTTP en la LAN sigue activo por compatibilidad (`HTTP_LAN=false`
+  para desactivarlo una vez instalado el certificado); quien controle tu usuario del PC puede leer
+  los datos de la app.

@@ -6,6 +6,7 @@ from .fake_moodle import FakeMoodle, serve
 
 # Chromium del sistema si Playwright no trae el suyo (CI / contenedores)
 os.environ.setdefault("MOODLE_TIMEOUT_MS", "10000")
+os.environ.setdefault("KEY_STORAGE", "file")  # las pruebas no tocan el llavero del sistema
 
 
 @pytest.fixture(scope="session")

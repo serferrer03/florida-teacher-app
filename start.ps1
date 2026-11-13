@@ -16,6 +16,9 @@ if (-not (Test-Path backend\.venv)) {
   backend\.venv\Scripts\python -m pip install --upgrade pip
   backend\.venv\Scripts\pip install -r backend\requirements.txt
   backend\.venv\Scripts\python -m playwright install chromium
+} else {
+  # tras una actualización puede haber dependencias nuevas (no descarga nada si ya están)
+  backend\.venv\Scripts\pip install -q -r backend\requirements.txt
 }
 if (-not (Test-Path backend\.env)) { Copy-Item backend\.env.example backend\.env }
 
@@ -26,9 +29,12 @@ Pop-Location
 
 # Permitir el puerto en el firewall solo para redes privadas (pide permisos de administrador una vez)
 $port = if ($env:PORT) { $env:PORT } else { 8000 }
-if (-not (Get-NetFirewallRule -DisplayName "Florida Teacher App" -ErrorAction SilentlyContinue)) {
-  Write-Host "Creando regla de firewall (solo redes privadas, puerto $port)..." -ForegroundColor Cyan
-  Start-Process powershell -Verb RunAs -Wait -ArgumentList "-NoProfile -Command New-NetFirewallRule -DisplayName 'Florida Teacher App' -Direction Inbound -Protocol TCP -LocalPort $port -Profile Private -Action Allow" -ErrorAction SilentlyContinue
+$httpsPort = if ($env:HTTPS_PORT) { $env:HTTPS_PORT } else { 8443 }
+if (-not (Get-NetFirewallRule -DisplayName "Florida Teacher App HTTPS" -ErrorAction SilentlyContinue)) {
+  Write-Host "Creando reglas de firewall (solo redes privadas, puertos $port y $httpsPort)..." -ForegroundColor Cyan
+  $cmd = "New-NetFirewallRule -DisplayName 'Florida Teacher App' -Direction Inbound -Protocol TCP -LocalPort $port -Profile Private -Action Allow -ErrorAction SilentlyContinue; " +
+         "New-NetFirewallRule -DisplayName 'Florida Teacher App HTTPS' -Direction Inbound -Protocol TCP -LocalPort $httpsPort -Profile Private -Action Allow"
+  Start-Process powershell -Verb RunAs -Wait -ArgumentList "-NoProfile -Command $cmd" -ErrorAction SilentlyContinue
 }
 
 # Acceso directo en el escritorio (una vez)
@@ -55,4 +61,4 @@ Start-Job -ArgumentList $PSScriptRoot, $port -ScriptBlock {
 
 Set-Location backend
 $env:PORT = $port
-.venv\Scripts\uvicorn app.main:app --host 0.0.0.0 --port $port
+.venv\Scripts\python run.py

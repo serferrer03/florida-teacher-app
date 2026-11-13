@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError, clearToken, getToken, setToken } from './api.js'
 import { CourseDetail } from './Assignments.jsx'
 import { CalendarView } from './Calendar.jsx'
+import { SecuritySettings } from './Settings.jsx'
 
 function formatDate(iso) {
   if (!iso) return 'nunca'
@@ -283,6 +284,7 @@ function Privacy({ onChanged }) {
         <button className="secondary" onClick={unlink}>Desvincular esta tablet</button>
         <button className="secondary danger" onClick={wipe}>Borrar todos mis datos</button>
       </div>
+      <SecuritySettings />
     </section>
   )
 }
@@ -294,6 +296,12 @@ export default function App() {
   const [token, setTokenState] = useState({ need: false, failed: false })
   const [view, setView] = useState('courses')
   const [course, setCourse] = useState(null)
+  const [offline, setOffline] = useState(!navigator.onLine)
+  useEffect(() => {
+    const on = () => setOffline(false); const off = () => setOffline(true)
+    window.addEventListener('online', on); window.addEventListener('offline', off)
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
+  }, [])
   const [connect, setConnect] = useState({ open: false, reason: '' })
   const [loggingIn, setLoggingIn] = useState(false)
 
@@ -352,6 +360,7 @@ export default function App() {
           </nav>
         )}
       </header>
+      {offline && <p className="offline" role="alert">Sin conexión de red: la app necesita estar en la misma Wi-Fi que el PC.</p>}
       <main>{body}</main>
     </div>
   )

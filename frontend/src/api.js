@@ -71,6 +71,9 @@ export const api = {
     const a = document.createElement('a'); a.href = url; a.download = file.name; a.click()
     setTimeout(() => URL.revokeObjectURL(url), 60000)
   },
+  connection: () => request('GET', '/api/connection'),
+  rotateCode: () => request('POST', '/api/access/rotate'),
+  restoreBackup: (data) => request('POST', '/api/backup', data),
   templates: () => request('GET', '/api/templates'),
   saveTemplate: (name, data) => request('POST', '/api/templates', { name, data }),
   deleteTemplate: (id) => request('DELETE', `/api/templates/${id}`),

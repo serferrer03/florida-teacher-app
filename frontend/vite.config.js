@@ -6,7 +6,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 const API_TARGET = process.env.API_TARGET || 'http://127.0.0.1:8000'
 
 export default defineConfig({
-  define: { __APP_VERSION__: JSON.stringify('0.6 · Fase 4 (entregas y notas)') },
+  define: { __APP_VERSION__: JSON.stringify('1.0') },
   plugins: [
     react(),
     VitePWA({
