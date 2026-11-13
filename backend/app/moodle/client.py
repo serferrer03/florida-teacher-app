@@ -557,3 +557,39 @@ class MoodleClient:
         from . import grading
         async with self.session(creds, diagnose=False) as page:
             return await grading.fetch_file(page, self.base, url)
+
+    # ------------------------------ Funciones extra: por alumno y evaluación
+    async def students_overview(self, creds: Credentials | None, course_id: int) -> dict:
+        """Todas las tareas del curso cruzadas por alumno (solo en memoria)."""
+        from . import contents, grading
+        async with self.session(creds, diagnose=False) as page:
+            secs = await contents.read_contents(page, self.base, course_id)
+            assigns = [{"cmid": i["cmid"], "name": i["name"]} for s in secs for i in s["items"]
+                       if i["modname"] == "assign"]
+            students: dict[int, dict] = {}
+            for a in assigns:
+                for r in await grading.list_submissions(page, self.base, a["cmid"]):
+                    st = students.setdefault(r["userid"], {"userid": r["userid"], "name": r["name"], "tasks": {}})
+                    st["tasks"][a["cmid"]] = {"submitted": r["submitted"], "late": r["late"],
+                                              "grade": r["grade"], "status": r["status"]}
+            return {"assignments": assigns,
+                    "students": sorted(students.values(), key=lambda s: s["name"].lower())}
+
+    async def collect_submissions(self, creds: Credentials | None, cmid: int) -> list[dict]:
+        """Entregas con su contenido descargado en memoria (para la evaluación automática)."""
+        from . import grading
+        async with self.session(creds, diagnose=False) as page:
+            rows = await grading.list_submissions(page, self.base, cmid)
+            out = []
+            for r in rows:
+                if not r["submitted"]:
+                    continue
+                files = []
+                for f in r["files"]:
+                    data, _ = await grading.fetch_file(page, self.base, f["url"])
+                    files.append((f["name"], data))
+                text = r["onlinetext"]
+                if r.get("onlinetext_url"):
+                    text = await grading.full_onlinetext(page, self.base, r["onlinetext_url"]) or text
+                out.append({"userid": r["userid"], "name": r["name"], "onlinetext": text, "files": files})
+            return out

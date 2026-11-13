@@ -44,6 +44,7 @@ READ_PAGE_JS = """([sel, headers, exclude]) => {
       onlinetext: cellText(tr, col.onlinetext).slice(0, 2000),
       feedback: cellText(tr, col.feedback).slice(0, 2000),
       files: [...tr.querySelectorAll(sel.file)].map(a => ({ name: a.textContent.trim(), url: a.href })),
+      onlinetext_url: (tr.querySelector(sel.onlinetext) || {}).href || null,
     };
   }).filter(Boolean);
 }"""
@@ -52,7 +53,8 @@ READ_PAGE_JS = """([sel, headers, exclude]) => {
 async def list_submissions(page: Page, base: str, cmid: int) -> list[dict]:
     rows: dict[int, dict] = {}
     sel = {"table": S.GRADING_TABLE, "row": S.GRADING_ROW, "user": S.ROW_USER_LINK,
-           "userid": S.ROW_USERID, "status": S.ROW_STATUS, "file": S.ROW_FILE_LINK}
+           "userid": S.ROW_USERID, "status": S.ROW_STATUS, "file": S.ROW_FILE_LINK,
+           "onlinetext": S.ROW_ONLINETEXT_LINK}
     for n in range(100):  # la tabla está paginada; se recorren las páginas
         await page.goto(base + S.GRADING_PATH.format(cmid=cmid, page=n), wait_until="domcontentloaded")
         found = await page.evaluate(READ_PAGE_JS, [sel, S.COLUMN_HEADERS, S.COLUMN_HEADERS_EXCLUDE])
@@ -112,6 +114,15 @@ async def save_grade(page: Page, base: str, cmid: int, userid: int, grade: float
         "[id^='id_error_'], .invalid-feedback:not(:empty), .alert-danger")
     if errors:
         raise MoodleError("Moodle no guardó la calificación: " + "; ".join(dict.fromkeys(errors)))
+
+
+async def full_onlinetext(page: Page, base: str, url: str) -> str:
+    """Texto en línea completo (la tabla solo muestra un resumen)."""
+    if not url.startswith(base + "/mod/assign/"):
+        return ""
+    await page.goto(url, wait_until="domcontentloaded")
+    el = page.locator(S.ONLINETEXT_FULL).first
+    return (await el.inner_text()).strip() if await el.count() else ""
 
 
 async def fetch_file(page: Page, base: str, url: str) -> tuple[bytes, str]:

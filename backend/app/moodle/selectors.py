@@ -145,6 +145,8 @@ GRADING_ROW = "table.generaltable tbody tr:not(.emptyrow)"
 ROW_USER_LINK = "a[href*='/user/view.php?id=']"
 ROW_USERID = "input[name='selectedusers'], input[name^='selectedusers']"
 ROW_STATUS = "[class*='submissionstatus'], .latesubmission, .earlysubmission, .overdue, .extensiongranted"
+ROW_ONLINETEXT_LINK = "a[href*='plugin=onlinetext']"     # "ver texto completo"
+ONLINETEXT_FULL = ".no-overflow, [role='main'] .box, #region-main"
 ROW_FILE_LINK = "a[href*='/pluginfile.php/'][href*='assignsubmission_file']"
 # Cabeceras de la tabla (minúsculas, contiene): para localizar columnas por su título
 COLUMN_HEADERS = {

@@ -248,3 +248,16 @@ PC y revisión de seguridad.
 - Riesgos aceptados: el servidor HTTP en la LAN sigue activo por compatibilidad (`HTTP_LAN=false`
   para desactivarlo una vez instalado el certificado); quien controle tu usuario del PC puede leer
   los datos de la app.
+
+## Funciones adicionales (v1.1)
+
+- **Por alumno:** pestaña en cada curso con la matriz alumnos × tareas (✅ entregada, ⏰ con retraso,
+  ❌ sin entregar), recuento por alumno, filtro «solo con pendientes» y detalle con notas. Datos solo
+  en memoria (`GET /api/courses/{id}/students-overview`).
+- **Evaluación automática con IA** (`backend/app/autoeval.py`, `ai_eval.py`, `sheets.py`): por tarea,
+  criterios + nota máxima + fecha de cierre. Un programador (cada 5 min, con la app encendida)
+  evalúa al pasar el cierre: descarga entregas, pide a Claude (`claude-opus-5-5`, salida JSON
+  estructurada, PDF/imágenes/texto/código/docx) nota y observación, guarda propuestas cifradas y
+  actualiza la hoja de Google vía Apps Script (`integraciones/google-sheets.gs`). El profesor revisa,
+  edita y publica en Florida Oberta (nota + comentario). Requisitos y límites legales:
+  PRIVACIDAD.md §7.

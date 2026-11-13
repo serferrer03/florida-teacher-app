@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from './api.js'
 import { ContentsView } from './Contents.jsx'
 import { GradingView } from './Grading.jsx'
+import { StudentsView } from './Students.jsx'
 
 // ------------------------------------------------------------ utilidades
 const pad = (n) => String(n).padStart(2, '0')
@@ -449,11 +450,13 @@ export function CourseDetail({ course, onBack, onNeedLogin }) {
         <nav className="tabs subtabs">
           <button className={tab === 'contents' ? 'tab active' : 'tab'} onClick={() => setTab('contents')}>Contenidos</button>
           <button className={tab === 'grading' ? 'tab active' : 'tab'} onClick={() => setTab('grading')}>Entregas y notas</button>
+          <button className={tab === 'students' ? 'tab active' : 'tab'} onClick={() => setTab('students')}>Por alumno</button>
           <button className={tab === 'assignments' ? 'tab active' : 'tab'} onClick={() => setTab('assignments')}>Tareas creadas desde la app</button>
         </nav>
       )}
       {mode === 'list' && tab === 'contents' && <ContentsView course={course} onNeedLogin={onNeedLogin} />}
       {mode === 'list' && tab === 'grading' && <GradingView course={course} onNeedLogin={onNeedLogin} />}
+      {mode === 'list' && tab === 'students' && <StudentsView course={course} onNeedLogin={onNeedLogin} />}
 
       {mode === 'list' && tab === 'assignments' && (
         <>

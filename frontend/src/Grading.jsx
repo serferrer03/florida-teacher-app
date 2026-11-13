@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from './api.js'
+import { AutoEvalPanel } from './AutoEval.jsx'
 
 // PRIVACIDAD: los datos del alumnado solo viven en la memoria de esta pantalla.
 const FILTERS = {
@@ -68,6 +69,7 @@ function SubmissionsList({ course, assign, onBack, onNeedLogin }) {
         <button className="secondary" onClick={load}>Recargar</button>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
+      <AutoEvalPanel course={course} assign={assign} fail={fail} />
       {!data && !error && <p className="spinner">Consultando entregas en Florida Oberta…</p>}
       {data && (
         <>

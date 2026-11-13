@@ -116,3 +116,27 @@ Activada con la autorización de Florida. Cómo se tratan:
 
 Recomendaciones: no califiques con la pantalla a la vista de terceros, cierra la app al terminar
 y no hagas capturas con datos del alumnado.
+
+## 7. Evaluación automática con IA y hoja de Google
+
+Es un tratamiento **nuevo y distinto** de los anteriores: los datos del alumnado salen de tu PC hacia
+terceros (Anthropic, proveedor de la IA Claude, y Google). **Necesitas la autorización expresa y
+específica del DPD de Florida** para esto; la autorización para usar la app en tu PC no lo cubre.
+Pregunta en concreto si puedes:
+- enviar el contenido de las entregas a la API de Anthropic (encargado del tratamiento, posible
+  transferencia internacional a EE. UU.: requiere contrato de encargo y garantías adecuadas);
+- guardar nombres, notas y observaciones en tu Google Drive (Florida usa Microsoft 365; quizá
+  prefieran una hoja de Excel en OneDrive institucional: dímelo y la adapto).
+
+Medidas que aplica la app:
+- **Revisión humana obligatoria** (art. 22 RGPD; la Ley de IA de la UE considera de alto riesgo
+  la evaluación del aprendizaje con IA): la IA solo **propone** nota y observación; nada se publica
+  en Florida Oberta hasta que lo revisas y confirmas. Las propuestas dudosas se marcan «Revisar».
+- **Seudonimización:** a la IA no se envía el nombre del alumno y los archivos se renombran
+  (`archivo_1.pdf`). Ojo: si el alumno pone su nombre dentro del trabajo, irá en el contenido.
+- **Minimización y plazo:** las propuestas se guardan en el PC con el nombre y la observación
+  **cifrados**; se borran al día de publicarse y, en todo caso, a los 30 días.
+- La hoja de Google solo recibe datos con un secreto que tú defines; no se da a la app acceso a tu
+  cuenta de Google.
+- Informa al alumnado (p. ej. en la guía docente o el enunciado) de que las tareas pueden
+  pre-evaluarse con IA y de que el profesor revisa todas las notas.

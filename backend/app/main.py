@@ -6,6 +6,7 @@ salvo a Florida Oberta/Microsoft, que es donde ya están tus datos.
 """
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import logging
@@ -26,7 +27,9 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
-from .assignments import AssignmentIn, to_form_values
+from . import ai_eval, sheets
+from .assignments import LOCAL_DT, AssignmentIn, to_form_values
+from .autoeval import STATUS_LABEL, AutoEvaluator
 from .config import BACKEND_DIR, get_settings
 from .crypto import CredentialCipher
 from .db import Database, now_iso
@@ -49,6 +52,7 @@ db = Database(settings.db_path)
 cipher = CredentialCipher(settings.key_path, use_keyring=os.environ.get("KEY_STORAGE", "auto") != "file")
 store = SessionStore(settings.session_path, cipher, settings.session_max_days)
 jobs = LoginJobs()
+autoeval: AutoEvaluator  # se crea tras definir get_moodle/stored_credentials
 _moodle: MoodleClient | None = None
 
 
@@ -132,6 +136,9 @@ async def wipe_everything() -> None:
     cipher.reset()  # borrado criptográfico: lo cifrado antes ya no se puede leer
 
 
+autoeval = AutoEvaluator(db, cipher, lambda: get_moodle(), lambda: stored_credentials())
+
+
 # ------------------------------------------------------------------- app
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -139,7 +146,9 @@ async def lifespan(_: FastAPI):
     if settings.legacy_storage_state_path.exists():
         settings.legacy_storage_state_path.unlink()
         log.info("Eliminado estado de sesión antiguo sin cifrar")
+    autoeval.start()
     yield
+    await autoeval.stop()
     if _moodle is not None:
         await _moodle.close()
 
@@ -528,6 +537,130 @@ async def calendar(year: int, month: int) -> dict:
     return {"year": year, "month": month, "events": events}
 
 
+# ------------------------------------------------- Vista por alumno
+@app.get("/api/courses/{course_id}/students-overview", dependencies=auth)
+async def students_overview(course_id: int) -> dict:
+    """Tareas del curso agrupadas por alumno. Datos del alumnado: solo en memoria."""
+    known_course(course_id)
+    data = await moodle_call(get_moodle().students_overview(stored_credentials(), course_id))
+    log.info("Vista por alumno: %d alumnos, %d tareas", len(data["students"]), len(data["assignments"]))
+    return data
+
+
+# ------------------------------------------------- Evaluación automática
+class AutoEvalIn(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    criteria: str = Field(min_length=10, max_length=10000)
+    grade_max: float = Field(gt=0, le=10000)
+    close_at: str = Field(pattern=LOCAL_DT)
+    enabled: bool = True
+
+
+class ResultEditIn(BaseModel):
+    grade: float | None = Field(default=None, ge=0, le=10000)
+    observation: str = Field(default="", max_length=20000)
+
+
+class PublishIn(BaseModel):
+    userids: list[int] | None = None   # None = todas las pendientes con nota
+    notify: bool = True
+
+
+@app.get("/api/autoeval/status", dependencies=auth)
+def autoeval_status() -> dict:
+    return {"ai_configured": ai_eval.configured(), "sheets_configured": sheets.configured(),
+            "model": os.environ.get("AUTO_EVAL_MODEL") or ai_eval.DEFAULT_MODEL,
+            "acknowledged": db.get_meta("autoeval_ack") is not None}
+
+
+@app.post("/api/autoeval/ack", dependencies=auth)
+def autoeval_ack() -> dict:
+    """El profesor declara que Florida autoriza enviar entregas a la IA y notas a Google."""
+    db.set_meta("autoeval_ack", now_iso())
+    return {"ok": True}
+
+
+@app.get("/api/courses/{course_id}/assign/{cmid}/autoeval", dependencies=auth)
+def get_autoeval(course_id: int, cmid: int) -> dict:
+    known_course(course_id)
+    return {"config": db.get_autoeval(cmid), "results": autoeval.results(cmid)}
+
+
+@app.put("/api/courses/{course_id}/assign/{cmid}/autoeval", dependencies=auth)
+def put_autoeval(course_id: int, cmid: int, body: AutoEvalIn) -> dict:
+    known_course(course_id)
+    if db.get_meta("autoeval_ack") is None:
+        raise HTTPException(403, "Primero confirma que Florida autoriza la evaluación con IA")
+    prev = db.get_autoeval(cmid)
+    db.upsert_autoeval(cmid, course_id, body.name, body.criteria.strip(), body.grade_max, body.close_at, body.enabled)
+    if not prev or prev["state"] in {"error", "waiting"}:
+        db.set_autoeval_state(cmid, "waiting")
+    return {"config": db.get_autoeval(cmid)}
+
+
+@app.delete("/api/courses/{course_id}/assign/{cmid}/autoeval", dependencies=auth)
+def delete_autoeval(course_id: int, cmid: int) -> dict:
+    known_course(course_id)
+    db.delete_autoeval(cmid)
+    return {"deleted": True}
+
+
+@app.post("/api/courses/{course_id}/assign/{cmid}/autoeval/run", dependencies=auth)
+async def run_autoeval(course_id: int, cmid: int) -> dict:
+    """Evalúa ya (sin esperar al cierre) o vuelve a evaluar."""
+    known_course(course_id)
+    if not db.get_autoeval(cmid):
+        raise HTTPException(404, "Activa primero la evaluación automática en esta tarea")
+    if not ai_eval.configured():
+        raise HTTPException(409, "Falta ANTHROPIC_API_KEY en backend/.env")
+    asyncio.create_task(autoeval.run(cmid))
+    return {"started": True}
+
+
+@app.patch("/api/courses/{course_id}/assign/{cmid}/autoeval/results/{userid}", dependencies=auth)
+def edit_result(course_id: int, cmid: int, userid: int, body: ResultEditIn) -> dict:
+    known_course(course_id)
+    row = next((r for r in db.list_results(cmid) if r["userid"] == userid), None)
+    if not row:
+        raise HTTPException(404, "Resultado no encontrado")
+    db.save_result(cmid, userid, row["name_enc"], body.grade, cipher.encrypt(body.observation.strip()), "proposed")
+    return {"ok": True}
+
+
+@app.post("/api/courses/{course_id}/assign/{cmid}/autoeval/publish", dependencies=auth)
+async def publish_autoeval(course_id: int, cmid: int, body: PublishIn) -> dict:
+    """Publica en Florida Oberta las notas REVISADAS por el profesor."""
+    known_course(course_id)
+    a = db.get_autoeval(cmid)
+    if not a:
+        raise HTTPException(404, "Sin evaluación automática")
+    moodle, creds = get_moodle(), stored_credentials()
+    published, errors, rows = 0, [], []
+    for r in autoeval.results(cmid):
+        if r["status"] == "published" or r["grade"] is None:
+            continue
+        if body.userids is not None and r["userid"] not in body.userids:
+            continue
+        if body.userids is None and r["status"] == "needs_review":
+            continue  # las marcadas "revisar" solo se publican una a una
+        try:
+            await moodle.save_grade(creds, cmid, r["userid"], r["grade"], r["observation"], body.notify)
+        except MoodleError as exc:
+            if isinstance(exc, MoodleAuthRequired):
+                raise moodle_http_error(exc) from exc
+            errors.append({"userid": r["userid"], "error": str(exc)})
+            continue
+        row = next(x for x in db.list_results(cmid) if x["userid"] == r["userid"])
+        db.save_result(cmid, r["userid"], row["name_enc"], r["grade"], row["observation_enc"], "published")
+        rows.append(autoeval.sheet_row(a, r["name"], r["grade"], r["observation"], "published"))
+        published += 1
+    sheet_error = await sheets.push(rows)
+    if all(x["status"] == "published" for x in db.list_results(cmid)):
+        db.set_autoeval_state(cmid, "done")
+    log.info("Evaluación automática: %d notas publicadas", published)
+    return {"published": published, "errors": errors, "sheet_error": sheet_error}
+
+
 # ------------------------------------------- Fase 6: HTTPS y diagnóstico
 @app.get("/ca.crt", include_in_schema=False)
 def ca_certificate() -> Response:
@@ -613,6 +746,10 @@ def privacy() -> dict:
             {"what": "Registro de tareas creadas desde la app", "stored": db.count_assignments() > 0,
              "detail": f"{db.count_assignments()} tareas (nombre, fecha de entrega, enlace)",
              "protection": "Base de datos local"},
+            {"what": "Propuestas de evaluación automática (nombre, nota, observación)",
+             "stored": db.count_results() > 0,
+             "detail": f"{db.count_results()} propuestas; se borran al día de publicarse o a los 30 días",
+             "protection": "Nombre y observación cifrados (Fernet/AES)"},
             {"what": "Plantillas de tareas", "stored": len(db.list_templates()) > 0,
              "detail": f"{len(db.list_templates())} plantillas (sin datos de alumnado)", "protection": "Base de datos local"},
             {"what": "Archivos adjuntos subidos desde la tablet", "stored": False,

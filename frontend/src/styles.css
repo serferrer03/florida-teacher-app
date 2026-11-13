@@ -111,3 +111,23 @@ button.link:disabled { opacity: .4; }
 .offline { background: #b54708; color: #fff; padding: 10px 14px; border-radius: 10px; margin: 0 0 12px; }
 .steps ol { padding-left: 20px; display: grid; gap: 8px; }
 label.button.secondary { display: inline-flex; align-items: center; min-height: 48px; padding: 0 20px; border-radius: 10px; border: 1px solid var(--border); font-weight: 600; cursor: pointer; }
+.matrix-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); margin-top: 10px; }
+.matrix { border-collapse: collapse; min-width: 100%; }
+.matrix th, .matrix td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: center; white-space: nowrap; }
+.matrix thead th { font-size: .8rem; color: var(--muted); max-width: 110px; vertical-align: bottom; }
+.matrix thead th span { display: inline-block; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+.matrix tbody th { text-align: left; position: sticky; left: 0; background: var(--surface); font-weight: 600; }
+.matrix tbody tr { cursor: pointer; }
+.matrix td.pending { color: var(--danger); font-weight: 600; }
+.matrix td.ok { color: #1a7f37; font-weight: 600; }
+.matrix tr.detail td { text-align: left; white-space: normal; background: var(--bg); }
+.autoeval { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 4px 14px; margin: 10px 0; }
+.autoeval summary { font-weight: 600; padding: 10px 0; }
+.autoeval[open] { padding-bottom: 14px; }
+.notice-box { border: 1px solid var(--accent); border-radius: 10px; padding: 12px 14px; display: grid; gap: 10px; }
+.result.published { opacity: .7; }
+.result.needs_review { border-color: #b54708; }
+h4 { margin: 12px 0 4px; }
+.result .row { align-items: center; }
+.result .row input[type=checkbox] { width: 24px; height: 24px; min-height: 0; accent-color: var(--accent); }
+.result { padding: 10px 14px; display: grid; gap: 8px; }
