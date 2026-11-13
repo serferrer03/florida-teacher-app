@@ -59,3 +59,58 @@ MS_MFA_PROOFS = "#idDiv_SAOTCS_Proofs [role='listitem'], #idDiv_SAOTCS_Proofs .t
 MS_KMSI = "#KmsiDescription, #KmsiCheckboxField, form[action*='kmsi']"
 MS_KMSI_YES = "#idSIButton9, button[data-testid='primaryButton']"
 MS_KMSI_NO = "#idBtn_Back, button[data-testid='secondaryButton']"
+
+# ================== FASE 2: CREAR TAREAS (mod/assign) =====================
+# Secciones (temas) en la página del curso
+COURSE_SECTION = "li.section[id^='section-'], li.course-section[id^='section-']"
+COURSE_SECTION_NAME = ".sectionname, [data-for='section_title'], h3"
+
+# Formulario estándar de Moodle para añadir una tarea
+ASSIGN_ADD_PATH = "/course/modedit.php?add=assign&type=&course={course}&section={section}&return=0&sr=0"
+ASSIGN_VIEW_PATH = "/mod/assign/view.php?id={cmid}"
+MODEDIT_FORM = "form.mform"
+# ids de los campos (formslib: id_<nombre>)
+ASSIGN_FIELDS = {
+    "name": "id_name",
+    "intro": "id_introeditor",              # descripción (TinyMCE/Atto sobre este textarea)
+    "showdescription": "id_showdescription",
+    "visible": "id_visible",
+    "onlinetext": "id_assignsubmission_onlinetext_enabled",
+    "file": "id_assignsubmission_file_enabled",
+    "maxfiles": "id_assignsubmission_file_maxfiles",
+    "maxsize": "id_assignsubmission_file_maxsizebytes",
+    "grade_type": "id_grade_modgrade_type",
+    "grade_point": "id_grade_modgrade_point",
+    "availability": "id_availabilityconditionsjson",  # JSON de "Restricciones de acceso"
+}
+# Fechas: id_<base>_enabled, id_<base>_day/_month/_year/_hour/_minute
+ASSIGN_DATES = {
+    "allow_from": "allowsubmissionsfromdate",
+    "due": "duedate",
+    "cutoff": "cutoffdate",
+    "grading_due": "gradingduedate",
+}
+ASSIGN_SUBMIT = "#id_submitbutton"          # "Guardar cambios y mostrar"
+FORM_ERRORS = "[id^='id_error_'], .invalid-feedback, span.error, .alert-danger"
+
+# "Archivos adicionales" (filemanager introattachments) y selector de archivos
+ATTACH_ADD = "#fitem_id_introattachments .fp-btn-add a, #fitem_id_introattachments .fp-btn-add button"
+ATTACH_FILENAME = "#fitem_id_introattachments .fp-filename"
+PICKER_DIALOG = ".file-picker"
+PICKER_UPLOAD_REPO = ".fp-repo:has-text('Subir un archivo'), .fp-repo:has-text('Upload a file')"
+PICKER_FILE_INPUT = "input[type='file'][name='repo_upload_file']"
+PICKER_UPLOAD_BTN = ".fp-upload-btn"
+PICKER_ERROR = ".fp-msg-error, .moodle-dialogue .fp-msg"
+
+# Datos que el propio formulario carga para el editor de restricciones
+# (solo nombres de grupos/agrupamientos/elementos de calificación, sin alumnado)
+JS_AVAILABILITY_OPTIONS = """() => {
+  const g = (o, k) => (o && o.form && o.form[k]) || [];
+  const M_ = window.M || {};
+  return {
+    enabled: !!document.getElementById('id_availabilityconditionsjson'),
+    groups: g(M_.availability_group, 'groups'),
+    groupings: g(M_.availability_grouping, 'groupings'),
+    grades: g(M_.availability_grade, 'grades'),
+  };
+}"""

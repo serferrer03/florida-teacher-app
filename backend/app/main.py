@@ -7,19 +7,24 @@ salvo a Florida Oberta/Microsoft, que es donde ya están tus datos.
 from __future__ import annotations
 
 import hmac
+import json
 import logging
 import os
+import re
+import secrets
+import shutil
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
+from .assignments import AssignmentIn, to_form_values
 from .config import BACKEND_DIR, get_settings
 from .crypto import CredentialCipher
 from .db import Database, now_iso
@@ -119,6 +124,8 @@ async def wipe_everything() -> None:
     db.wipe()
     store.clear()
     settings.legacy_storage_state_path.unlink(missing_ok=True)
+    shutil.rmtree(settings.data_dir / "uploads", ignore_errors=True)
+    _options_cache.clear()
     cipher.reset()  # borrado criptográfico: lo cifrado antes ya no se puede leer
 
 
@@ -294,6 +301,88 @@ async def sync_courses() -> dict:
     return {"courses": db.list_courses(), "synced_at": db.get_meta("courses_synced_at")}
 
 
+# --------------------------------------------------------- Fase 2: tareas
+MAX_FILE_BYTES = 100 * 1024 * 1024
+MAX_FILES = 20
+_options_cache: dict[int, tuple[float, dict]] = {}
+
+
+def known_course(course_id: int) -> None:
+    if not any(c["id"] == course_id for c in db.list_courses()):
+        raise HTTPException(404, "Curso desconocido: actualiza la lista de cursos")
+
+
+@app.get("/api/courses/{course_id}/assign-options", dependencies=auth)
+async def assign_options(course_id: int, refresh: bool = False) -> dict:
+    """Temas del curso, grupos, agrupamientos y elementos de calificación (sin alumnado)."""
+    known_course(course_id)
+    cached = _options_cache.get(course_id)
+    if cached and not refresh and time.time() - cached[0] < 600:
+        return cached[1]
+    try:
+        opts = await get_moodle().assign_options(stored_credentials(), course_id)
+    except MoodleError as exc:
+        raise moodle_http_error(exc) from exc
+    _options_cache[course_id] = (time.time(), opts)
+    return opts
+
+
+@app.get("/api/courses/{course_id}/assignments", dependencies=auth)
+def list_assignments(course_id: int) -> dict:
+    return {"assignments": db.list_assignments(course_id)}
+
+
+def safe_filename(name: str) -> str:
+    name = Path(name or "archivo").name
+    name = re.sub(r"[^\w.\- ()áéíóúÁÉÍÓÚñÑüÜçÇàèòÀÈÒ]", "_", name).strip(" .") or "archivo"
+    return name[:150]
+
+
+@app.post("/api/courses/{course_id}/assignments", dependencies=auth)
+async def create_assignment(course_id: int, data: str = Form(...),
+                            files: list[UploadFile] = File(default=[])) -> dict:
+    known_course(course_id)
+    try:
+        assignment = AssignmentIn.model_validate(json.loads(data))
+    except (ValueError, ValidationError) as exc:
+        msg = exc.errors()[0]["msg"] if isinstance(exc, ValidationError) else "Datos no válidos"
+        raise HTTPException(422, msg.removeprefix("Value error, ")) from exc
+    if len(files) > MAX_FILES:
+        raise HTTPException(413, f"Máximo {MAX_FILES} archivos por tarea")
+
+    # Los archivos solo se guardan en el PC el tiempo necesario para adjuntarlos.
+    tmp = settings.data_dir / "uploads" / secrets.token_hex(8)
+    tmp.mkdir(parents=True, mode=0o700)
+    try:
+        paths: list[Path] = []
+        for up in files:
+            target = tmp / safe_filename(up.filename)
+            i = 1
+            while target.exists():
+                target = tmp / f"{target.stem}_{i}{target.suffix}"
+                i += 1
+            size = 0
+            with target.open("wb") as fh:
+                while chunk := await up.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > MAX_FILE_BYTES:
+                        raise HTTPException(413, f"«{up.filename}» supera los 100 MB")
+                    fh.write(chunk)
+            paths.append(target)
+        values = to_form_values(assignment)
+        try:
+            result = await get_moodle().create_assignment(stored_credentials(), course_id, values, paths)
+        except MoodleError as exc:
+            raise moodle_http_error(exc) from exc
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    db.add_assignment(course_id, result["cmid"], assignment.name, assignment.due, result["url"],
+                      len(paths), values["availability"] is not None)
+    log.info("Tarea creada en el curso %s (cmid %s)", course_id, result["cmid"])
+    return {**result, "name": assignment.name}
+
+
 # -------------------------------------------------------------- privacidad
 @app.get("/api/privacy", dependencies=auth)
 def privacy() -> dict:
@@ -313,6 +402,11 @@ def privacy() -> dict:
             {"what": "Cookies de sesión (Moodle y Microsoft)", "stored": store.exists(),
              "detail": f"Guardada {session_age}; se borra sola a los {settings.session_max_days} días" if session_age else None,
              "protection": "Cifradas (Fernet/AES)"},
+            {"what": "Registro de tareas creadas desde la app", "stored": db.count_assignments() > 0,
+             "detail": f"{db.count_assignments()} tareas (nombre, fecha de entrega, enlace)",
+             "protection": "Base de datos local"},
+            {"what": "Archivos adjuntos subidos desde la tablet", "stored": False,
+             "detail": "Se borran del PC en cuanto se adjuntan en Florida Oberta", "protection": "Borrado inmediato"},
             {"what": "Lista de tus cursos", "stored": db.count_courses() > 0,
              "detail": f"{db.count_courses()} cursos (nombre, código, categoría, enlace)", "protection": "Base de datos local"},
         ],

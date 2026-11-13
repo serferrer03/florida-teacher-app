@@ -459,3 +459,27 @@ class MoodleClient:
                     "url": href,
                 }
         return sorted(seen.values(), key=lambda c: c["fullname"].lower())
+
+    # ------------------------------------------------------- Fase 2: tareas
+    async def assign_options(self, creds: Credentials | None, course_id: int) -> dict:
+        """Secciones del curso y opciones del formulario (grupos, tamaños...)."""
+        from . import assign
+        async with self.session(creds) as page:
+            sections = await assign.read_sections(page, self.base, course_id)
+            await assign.open_add_form(page, self.base, course_id, sections[0]["number"])
+            return {"sections": sections, **await assign.read_form_options(page)}
+
+    async def create_assignment(self, creds: Credentials | None, course_id: int, values: dict,
+                                files: list) -> dict:
+        """Crea la tarea. `values` ya validado (ver app/assignments.py)."""
+        from . import assign
+        async with self.session(creds) as page:
+            await assign.open_add_form(page, self.base, course_id, values["section"])
+            missing = await page.evaluate(assign.FILL_JS, {
+                "f": S.ASSIGN_FIELDS, "dates": S.ASSIGN_DATES, "v": values})
+            if missing:
+                raise MoodleError("No se pudieron rellenar estos campos: " + ", ".join(missing))
+            if files:
+                await assign.attach_files(page, files)
+            cmid = await assign.submit(page)
+            return {"cmid": cmid, "url": self.url(S.ASSIGN_VIEW_PATH.format(cmid=cmid))}

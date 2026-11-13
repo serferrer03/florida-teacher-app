@@ -22,6 +22,17 @@ CREATE TABLE IF NOT EXISTS courses (
     url TEXT NOT NULL,
     synced_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    course_id INTEGER NOT NULL,
+    cmid INTEGER NOT NULL,              -- id de la actividad en Moodle
+    name TEXT NOT NULL,
+    due TEXT,
+    url TEXT NOT NULL,
+    files INTEGER NOT NULL DEFAULT 0,
+    restricted INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -103,6 +114,25 @@ class Database:
             rows = conn.execute("SELECT * FROM courses ORDER BY fullname COLLATE NOCASE").fetchall()
             return [dict(r) for r in rows]
 
+    def add_assignment(self, course_id: int, cmid: int, name: str, due: str | None, url: str,
+                       files: int, restricted: bool) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO assignments (course_id, cmid, name, due, url, files, restricted, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (course_id, cmid, name, due, url, files, int(restricted), now_iso()),
+            )
+
+    def list_assignments(self, course_id: int) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM assignments WHERE course_id = ? ORDER BY id DESC", (course_id,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def count_assignments(self) -> int:
+        with self.connect() as conn:
+            return conn.execute("SELECT COUNT(*) FROM assignments").fetchone()[0]
+
     def count_courses(self) -> int:
         with self.connect() as conn:
             return conn.execute("SELECT COUNT(*) FROM courses").fetchone()[0]
@@ -112,6 +142,7 @@ class Database:
         with self.connect() as conn:
             conn.execute("DELETE FROM credentials")
             conn.execute("DELETE FROM courses")
+            conn.execute("DELETE FROM assignments")
             conn.execute("DELETE FROM meta")
         with self.connect() as conn:
             conn.execute("VACUUM")  # no dejar restos en páginas libres del archivo

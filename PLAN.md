@@ -8,8 +8,8 @@ corre en el PC del profesor y la tablet lo usa como PWA a través de la red loca
 | Fase | Estado |
 |------|--------|
 | 1. Base: login Microsoft (Office 365) y listado de cursos | ✅ Hecha |
-| 2. Creación de tareas (fechas, archivos, restricciones) | ⏭️ Siguiente |
-| 3. Contenidos del curso | Pendiente |
+| 2. Creación de tareas (fechas, archivos, restricciones) | ✅ Hecha (pendiente de validar con Florida Oberta real) |
+| 3. Contenidos del curso | ⏭️ Siguiente |
 | 4. Entregas y calificación | Pendiente |
 | 5. Planificación, plantillas y calendario | Pendiente |
 | 6. Robustez y usabilidad | Pendiente |
@@ -126,7 +126,16 @@ desde la tablet, sesión y contraseña opcional cifradas, selectores centralizad
 listado de cursos, código de emparejamiento obligatorio, pestaña de privacidad con borrado total,
 scripts de arranque y pruebas con Moodle/Microsoft simulados.
 
-### 2. Creación de tareas
+### 2. Creación de tareas ✅
+Implementado: tocar un curso → «Nueva tarea» → formulario → revisión → creación. API:
+`GET /api/courses/{id}/assign-options` (temas, grupos, agrupamientos, elementos de calificación,
+límites de archivos; solo nombres, sin alumnado), `POST /api/courses/{id}/assignments` (multipart:
+`data` JSON + `files`), `GET /api/courses/{id}/assignments` (registro local). Lógica en
+`backend/app/moodle/assign.py` y `backend/app/assignments.py`; ids del formulario en `selectors.py`
+(`ASSIGN_FIELDS`, `ASSIGN_DATES`, `ATTACH_*`, `PICKER_*`). Las restricciones se escriben como el JSON
+de `core_availability`.
+
+Alcance original:
 Crear actividades «Tarea» (`mod/assign`) en un curso desde la tablet:
 - Formulario: nombre, descripción, sección/tema destino, visibilidad.
 - Fechas: disponible desde, fecha de entrega, fecha límite, recordarme calificar.

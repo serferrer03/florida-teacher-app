@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError, clearToken, getToken, setToken } from './api.js'
+import { CourseDetail } from './Assignments.jsx'
 
 function formatDate(iso) {
   if (!iso) return 'nunca'
@@ -157,7 +158,7 @@ function LoginProgress({ onFinished }) {
 }
 
 // ------------------------------------------------------------------ cursos
-function Courses({ status, onNeedLogin }) {
+function Courses({ status, onNeedLogin, onOpen }) {
   const [courses, setCourses] = useState([])
   const [syncedAt, setSyncedAt] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -216,7 +217,7 @@ function Courses({ status, onNeedLogin }) {
       <ul className="courses">
         {visible.map((c) => (
           <li key={c.id} className="course">
-            <a href={c.url} target="_blank" rel="noreferrer noopener">
+            <a href={c.url} onClick={(e) => { e.preventDefault(); onOpen(c) }}>
               <span className="course-name">{c.fullname}</span>
               <span className="course-meta">
                 {[c.shortname, c.category].filter(Boolean).join(' · ') || `ID ${c.id}`}
@@ -291,6 +292,7 @@ export default function App() {
   const [error, setError] = useState('')
   const [token, setTokenState] = useState({ need: false, failed: false })
   const [view, setView] = useState('courses')
+  const [course, setCourse] = useState(null)
   const [connect, setConnect] = useState({ open: false, reason: '' })
   const [loggingIn, setLoggingIn] = useState(false)
 
@@ -330,7 +332,8 @@ export default function App() {
       onStarted={() => setLoggingIn(true)}
       onCancel={status.has_session ? () => setConnect({ open: false, reason: '' }) : null} />
   )
-  else body = <Courses status={status} onNeedLogin={onNeedLogin} />
+  else if (course) body = <CourseDetail course={course} onBack={() => setCourse(null)} onNeedLogin={onNeedLogin} />
+  else body = <Courses status={status} onNeedLogin={onNeedLogin} onOpen={setCourse} />
 
   return (
     <div className="app">
@@ -338,7 +341,7 @@ export default function App() {
         <h1>Florida Teacher App</h1>
         {status && !token.need && (
           <nav className="tabs">
-            <button className={view === 'courses' ? 'tab active' : 'tab'} onClick={() => setView('courses')}>Cursos</button>
+            <button className={view === 'courses' ? 'tab active' : 'tab'} onClick={() => { setView('courses'); setCourse(null) }}>Cursos</button>
             <button className={view === 'privacy' ? 'tab active' : 'tab'} onClick={() => setView('privacy')}>Privacidad</button>
             {status.has_session && view === 'courses' && !loggingIn && (
               <button className="tab" onClick={() => setConnect({ open: true, reason: '' })}>Cuenta</button>

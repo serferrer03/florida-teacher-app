@@ -16,10 +16,12 @@ export class ApiError extends Error {
 }
 
 async function request(method, path, body) {
-  const headers = { 'Content-Type': 'application/json', 'X-App-Token': getToken() }
+  const headers = { 'X-App-Token': getToken() }
+  const isForm = body instanceof FormData
+  if (body && !isForm) headers['Content-Type'] = 'application/json'
   let res
   try {
-    res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined, cache: 'no-store' })
+    res = await fetch(path, { method, headers, body: body ? (isForm ? body : JSON.stringify(body)) : undefined, cache: 'no-store' })
   } catch {
     throw new ApiError(0, 'No se puede contactar con el PC. ¿Está encendido el servidor y estás en la misma red?')
   }
@@ -41,5 +43,14 @@ export const api = {
   courses: () => request('GET', '/api/courses'),
   syncCourses: () => request('POST', '/api/courses/sync'),
   privacy: () => request('GET', '/api/privacy'),
+  assignOptions: (courseId, refresh = false) =>
+    request('GET', `/api/courses/${courseId}/assign-options${refresh ? '?refresh=true' : ''}`),
+  assignments: (courseId) => request('GET', `/api/courses/${courseId}/assignments`),
+  createAssignment: (courseId, data, files) => {
+    const fd = new FormData()
+    fd.append('data', JSON.stringify(data))
+    files.forEach((f) => fd.append('files', f, f.name))
+    return request('POST', `/api/courses/${courseId}/assignments`, fd)
+  },
   deleteAll: () => request('DELETE', '/api/data'),
 }

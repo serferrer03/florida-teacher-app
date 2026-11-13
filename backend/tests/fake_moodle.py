@@ -30,6 +30,8 @@ class FakeMoodle:
         self.ajax_enabled = True
         self.ajax_empty = False
         self.email_glitches = 0
+        self.created: list[dict] = []   # tareas recibidas por el formulario
+        self.uploads: dict[str, bytes] = {}
         self.mode = "microsoft"
         self.mfa: str | None = None
         self.mfa_approved = False
@@ -117,6 +119,104 @@ class FakeMoodle:
             base = str(req.base_url).rstrip("/")
             courses = [] if self.ajax_empty else [{**c, "viewurl": f"{base}/course/view.php?id={c['id']}"} for c in COURSES]
             return JSONResponse([{"error": False, "data": {"courses": courses, "nextoffset": 2}}])
+
+        # ------------------------------------------- Fase 2: curso y tareas
+        @app.get("/course/view.php")
+        def course_view(req: Request, id: int):
+            if not logged(req):
+                return RedirectResponse("/login/index.php", status_code=303)
+            return HTMLResponse("""<html><body><ul>
+<li id="section-0" class="section"><h3 class="sectionname">General</h3></li>
+<li id="section-1" class="section"><h3 class="sectionname">Tema 1: Introducción</h3></li>
+<li id="section-2" class="section"><h3 class="sectionname">Tema 2</h3></li></ul></body></html>""")
+
+        def date_fields(base: str, enabled: bool) -> str:
+            sel = lambda n, a, b: f'<select id="id_{base}_{n}" name="{base}[{n}]">' + "".join(  # noqa: E731
+                f'<option value="{v}">{v}</option>' for v in range(a, b)) + "</select>"
+            chk = "checked" if enabled else ""
+            return (f'<input type="checkbox" id="id_{base}_enabled" name="{base}[enabled]" value="1" {chk}>'
+                    + sel("day", 1, 32) + sel("month", 1, 13) + sel("year", 2020, 2031)
+                    + sel("hour", 0, 24) + f'<select id="id_{base}_minute" name="{base}[minute]">'
+                    + "".join(f'<option value="{m}">{m:02d}</option>' for m in range(0, 60, 5)) + "</select>")
+
+        @app.get("/course/modedit.php")
+        def modedit(req: Request, course: int = 0, section: int = 0, error: str = ""):
+            if not logged(req):
+                return RedirectResponse("/login/index.php", status_code=303)
+            err = f'<div class="invalid-feedback" id="id_error_name">{error}</div>' if error else ""
+            dates = "".join(date_fields(b, b != "cutoffdate") for b in
+                            ("allowsubmissionsfromdate", "duedate", "cutoffdate", "gradingduedate"))
+            return HTMLResponse(f"""<html><body>
+<form class="mform" method="post" action="/course/modedit.php">
+<input type="hidden" name="course" value="{course}"><input type="hidden" name="section" value="{section}">
+<input id="id_name" name="name">{err}
+<textarea id="id_introeditor" name="introeditor[text]"></textarea>
+<input type="checkbox" id="id_showdescription" name="showdescription" value="1">
+<div id="fitem_id_introattachments"><div class="fp-btn-add"><a href="#" onclick="openPicker();return false">Agregar</a></div>
+<div class="fp-files"></div><input type="hidden" name="introattachments" id="att" value=""></div>
+<fieldset style="display:none">{dates}
+<input type="checkbox" id="id_assignsubmission_onlinetext_enabled" name="assignsubmission_onlinetext_enabled" value="1">
+<input type="checkbox" id="id_assignsubmission_file_enabled" name="assignsubmission_file_enabled" value="1" checked>
+<select id="id_assignsubmission_file_maxfiles" name="assignsubmission_file_maxfiles">{"".join(f'<option value="{i}">{i}</option>' for i in range(1, 21))}</select>
+<select id="id_assignsubmission_file_maxsizebytes" name="assignsubmission_file_maxsizebytes">
+<option value="0">Límite de subida del curso (100 MB)</option><option value="10485760">10 MB</option><option value="1048576">1 MB</option></select>
+<select id="id_grade_modgrade_type" name="grade[modgrade_type]"><option value="none">Ninguna</option><option value="point" selected>Puntuación</option></select>
+<input id="id_grade_modgrade_point" name="grade[modgrade_point]" value="100">
+<select id="id_visible" name="visible"><option value="1">Mostrar</option><option value="0">Ocultar</option></select>
+<textarea id="id_availabilityconditionsjson" name="availabilityconditionsjson"></textarea>
+</fieldset>
+<input type="submit" id="id_submitbutton2" value="Guardar y regresar al curso">
+<input type="submit" id="id_submitbutton" name="submitbutton" value="Guardar cambios y mostrar">
+</form>
+<div class="file-picker" id="picker" style="display:none">
+ <div class="fp-repo"><a href="#">Subir un archivo</a></div>
+ <input type="file" name="repo_upload_file" id="upfile"><button class="fp-upload-btn" onclick="upload();return false">Subir este archivo</button>
+</div>
+<script>
+window.M = {{cfg: {{sesskey: '{SESSKEY}'}},
+  availability_group: {{form: {{groups: [{{id: 11, name: 'Grupo A'}}, {{id: 12, name: 'Grupo B'}}]}}}},
+  availability_grouping: {{form: {{groupings: [{{id: 21, name: 'Mañana'}}]}}}},
+  availability_grade: {{form: {{grades: [{{id: 31, name: 'Práctica 1'}}]}}}}}};
+// Como formslib: el checkbox "Habilitar" activa/desactiva los selects de la fecha
+document.querySelectorAll('input[id$="_enabled"][id^="id_"]').forEach(cb => {{
+  const base = cb.id.replace('_enabled', '');
+  const sync = () => document.querySelectorAll(`select[id^="${{base}}_"]`).forEach(s => s.disabled = !cb.checked);
+  cb.addEventListener('click', sync); sync();
+}});
+function openPicker() {{ document.getElementById('picker').style.display = 'block'; }}
+async function upload() {{
+  const f = document.getElementById('upfile').files[0];
+  const fd = new FormData(); fd.append('repo_upload_file', f);
+  const r = await (await fetch('/repository/upload', {{method: 'POST', body: fd}})).json();
+  const d = document.createElement('div'); d.className = 'fp-filename'; d.textContent = r.name;
+  document.querySelector('#fitem_id_introattachments .fp-files').appendChild(d);
+  const att = document.getElementById('att'); att.value = (att.value ? att.value + '|' : '') + r.name;
+  document.getElementById('upfile').value = '';
+  document.getElementById('picker').style.display = 'none';
+}}
+</script></body></html>""")
+
+        @app.post("/repository/upload")
+        async def repo_upload(req: Request):
+            form = await req.form()
+            f = form["repo_upload_file"]
+            self.uploads[f.filename] = await f.read()
+            return {"name": f.filename}
+
+        @app.post("/course/modedit.php")
+        async def modedit_post(req: Request):
+            form = dict((await req.form()).multi_items())
+            if not form.get("name"):
+                return modedit(req, int(form.get("course", 0)), int(form.get("section", 0)),
+                               "Falta incluir este campo")
+            cmid = 500 + len(self.created)
+            self.created.append(form)
+            return RedirectResponse(f"/mod/assign/view.php?id={cmid}", status_code=303)
+
+        @app.get("/mod/assign/view.php")
+        def assign_view(req: Request, id: int):
+            return HTMLResponse(f'<html><body><a id="user-menu-toggle"></a><h2>Tarea {id}</h2>'
+                                f"<script>window.M={{cfg:{{sesskey:'{SESSKEY}'}}}}</script></body></html>")
 
         # ------------------------------------------- Microsoft (simulado)
         @app.get("/ms/login")
