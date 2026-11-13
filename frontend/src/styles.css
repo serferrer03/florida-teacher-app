@@ -71,3 +71,4 @@ a.button { display: inline-flex; align-items: center; min-height: 48px; padding:
 .summary dt { color: var(--muted); }
 .summary dd { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .summary { grid-template-columns: 1fr; } .summary dd { margin-bottom: 6px; } }
+.version { font-size: .75rem; font-weight: 500; color: var(--muted); margin-left: 6px; }

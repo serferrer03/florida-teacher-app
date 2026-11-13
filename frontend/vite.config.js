@@ -6,6 +6,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 const API_TARGET = process.env.API_TARGET || 'http://127.0.0.1:8000'
 
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify('0.3 · Fase 2 (crear tareas)') },
   plugins: [
     react(),
     VitePWA({
@@ -29,6 +30,10 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // La versión nueva sustituye a la antigua en cuanto se detecta (sin quedarse en caché)
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         // Las llamadas a la API nunca se cachean: siempre van al PC.
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [{ urlPattern: /\/api\//, handler: 'NetworkOnly' }],

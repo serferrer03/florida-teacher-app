@@ -179,6 +179,9 @@ async def security_headers(request: Request, call_next):
     )
     if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store"
+    elif not request.url.path.startswith("/assets/"):
+        # index.html, sw.js y manifest: siempre comprobar si hay versión nueva
+        response.headers["Cache-Control"] = "no-cache"
     return response
 
 

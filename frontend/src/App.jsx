@@ -338,7 +338,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <h1>Florida Teacher App</h1>
+        <h1>Florida Teacher App <span className="version">v{__APP_VERSION__}</span></h1>
         {status && !token.need && (
           <nav className="tabs">
             <button className={view === 'courses' ? 'tab active' : 'tab'} onClick={() => { setView('courses'); setCourse(null) }}>Cursos</button>
