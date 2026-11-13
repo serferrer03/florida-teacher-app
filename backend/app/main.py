@@ -229,7 +229,10 @@ async def login_start(body: LoginIn) -> dict:
         db.set_meta("last_login_ok", now_iso())
         job.message = "Sesión iniciada. Descargando cursos…"
         try:
-            db.replace_courses(await moodle.list_courses(creds))
+            courses = await moodle.list_courses(creds)
+            db.replace_courses(courses)
+            if not courses:
+                info["courses_error"] = "Florida Oberta no devolvió ningún curso"
         except MoodleError as exc:
             info["courses_error"] = str(exc)
             log.warning("Login correcto pero falló la descarga de cursos: %s", exc)

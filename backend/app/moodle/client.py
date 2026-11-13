@@ -250,16 +250,19 @@ class MoodleClient:
         if self._interactive:
             raise MoodleBusy("Hay un inicio de sesión en curso; termínalo primero")
         async with self._lock:
-            if not self.store.exists() and (creds is None or not creds.password):
+            if not self.store.exists() and (creds is None or not creds.password):  # nada con qué entrar
                 raise MoodleAuthRequired("Hace falta iniciar sesión")
             async with self._context() as context:
                 page = await context.new_page()
                 try:
                     await page.goto(self.url(S.DASHBOARD_PATH), wait_until="domcontentloaded")
                     if not await self._is_logged_in(page):
-                        log.info("Sesión caducada: reintentando login en segundo plano")
-                        if creds is None or not creds.password:
+                        log.info("Sesión de Moodle no válida (página: %s): reintentando en segundo plano",
+                                 urlparse(page.url).path)
+                        if creds is None or not creds.username:
                             raise MoodleAuthRequired("La sesión ha caducado: vuelve a conectar")
+                        # Sin contraseña también se intenta: Microsoft suele reconocer la sesión
+                        # guardada ("mantener sesión"); si pide contraseña o MFA, se para.
                         await self._login(page, creds, SilentUI())
                     await self._save_state(context)
                     yield page

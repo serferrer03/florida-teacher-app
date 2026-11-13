@@ -51,7 +51,7 @@ function ConnectForm({ status, reason, onStarted, onCancel }) {
   return (
     <form className="card" onSubmit={(e) => { e.preventDefault(); start(false) }}>
       <h2>Conectar con Florida Oberta</h2>
-      {reason && <p className="notice">{reason}</p>}
+      {reason && <p className="error" role="alert">{reason}</p>}
       <p className="muted">
         Inicia sesión con tu cuenta de Microsoft (Office 365) de Florida. Si te pide verificación
         en dos pasos, aquí verás el número o podrás escribir el código.
@@ -196,7 +196,7 @@ function Courses({ status, onNeedLogin }) {
       <div className="toolbar">
         <div>
           <h2>Mis cursos</h2>
-          <p className="muted">{status.username} · Actualizado: {formatDate(syncedAt)}</p>
+          <p className="muted">{status.username || 'Florida Oberta'} · Actualizado: {formatDate(syncedAt)}</p>
         </div>
         <button onClick={sync} disabled={busy}>{busy ? 'Sincronizando…' : 'Actualizar'}</button>
       </div>
@@ -325,7 +325,7 @@ export default function App() {
   )
   else if (view === 'privacy') body = <Privacy onChanged={load} />
   else if (loggingIn) body = <LoginProgress onFinished={onLoginFinished} />
-  else if (!status.has_account || !status.has_session || connect.open) body = (
+  else if (!status.has_session || connect.open) body = (
     <ConnectForm status={status} reason={connect.reason}
       onStarted={() => setLoggingIn(true)}
       onCancel={status.has_session ? () => setConnect({ open: false, reason: '' }) : null} />
