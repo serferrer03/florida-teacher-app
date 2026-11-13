@@ -95,3 +95,16 @@ button.link:disabled { opacity: .4; }
 .calendar .day.past { opacity: .6; }
 .calendar .time { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 3.2em; }
 .grow { flex: 1 1 260px; padding: 8px 0; }
+.subs { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 8px; }
+.subs > li { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.sub-head { width: 100%; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: none; color: var(--text); text-align: left; padding: 10px 14px; }
+.sub-name { flex: 1 1 180px; font-weight: 600; }
+.sub-grade { font-variant-numeric: tabular-nums; color: var(--muted); }
+.badge.ok { background: color-mix(in srgb, #1a7f37 18%, transparent); }
+.badge.warn { background: color-mix(in srgb, #b54708 22%, transparent); }
+.sub-body { padding: 0 14px 14px; display: grid; gap: 10px; }
+.onlinetext { margin: 0; padding: 10px 14px; border-left: 4px solid var(--border); background: var(--bg); white-space: pre-wrap; max-height: 240px; overflow: auto; }
+.gradebox { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+.gradebox label:first-child { width: 120px; }
+.gradebox .grow { flex: 1 1 240px; }
+.gradebox label:first-child input { width: 100%; }

@@ -135,3 +135,28 @@ RETURN_TO_COURSE_SUBMIT = "#id_submitbutton2"   # "Guardar cambios y regresar al
 
 # ================== FASE 5: CALENDARIO ====================================
 AJAX_CALENDAR_MONTH = "core_calendar_get_calendar_monthly_view"   # vista mensual (todas tus asignaturas)
+
+# ================== FASE 4: ENTREGAS Y CALIFICACIÓN ========================
+# Datos del alumnado: se leen al momento y NUNCA se guardan en el PC.
+GRADING_PATH = "/mod/assign/view.php?id={cmid}&action=grading&page={page}"
+GRADE_PATH = "/mod/assign/view.php?id={cmid}&action=grade&userid={userid}&rownum=0"
+GRADING_TABLE = "table.generaltable"
+GRADING_ROW = "table.generaltable tbody tr:not(.emptyrow)"
+ROW_USER_LINK = "a[href*='/user/view.php?id=']"
+ROW_USERID = "input[name='selectedusers'], input[name^='selectedusers']"
+ROW_STATUS = "[class*='submissionstatus'], .latesubmission, .earlysubmission, .overdue, .extensiongranted"
+ROW_FILE_LINK = "a[href*='/pluginfile.php/'][href*='assignsubmission_file']"
+# Cabeceras de la tabla (minúsculas, contiene): para localizar columnas por su título
+COLUMN_HEADERS = {
+    "grade": ["calificación", "grade"],
+    "modified": ["última modificación (entrega)", "last modified (submission)"],
+    "onlinetext": ["texto en línea", "online text"],
+    "feedback": ["comentarios de retroalimentación", "feedback comments"],
+}
+COLUMN_HEADERS_EXCLUDE = ["final"]   # "Calificación final" no es la columna editable
+# Formulario de calificación clásico (action=grade)
+GRADE_INPUT = "#id_grade"
+FEEDBACK_EDITOR = "id_assignfeedbackcomments_editor"
+NOTIFY_STUDENT = "#id_sendstudentnotifications"
+SAVE_GRADE = "#id_savegrade"
+SAVE_OK = ".alert-success, .notifysuccess, [data-region='notification'] .alert-success"

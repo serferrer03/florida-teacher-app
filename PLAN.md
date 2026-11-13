@@ -10,9 +10,9 @@ corre en el PC del profesor y la tablet lo usa como PWA a través de la red loca
 | 1. Base: login Microsoft (Office 365) y listado de cursos | ✅ Hecha |
 | 2. Creación de tareas (fechas, archivos, restricciones) | ✅ Hecha y validada |
 | 3. Contenidos del curso | ✅ Hecha (pendiente de validar con Florida Oberta real) |
-| 4. Entregas y calificación | ⏭️ Siguiente |
+| 4. Entregas y calificación | ✅ Hecha (pendiente de validar con Florida Oberta real) |
 | 5. Planificación, plantillas y calendario | ✅ Hecha (pendiente de validar con Florida Oberta real) |
-| 6. Robustez y usabilidad | Pendiente |
+| 6. Robustez y usabilidad | ⏭️ Siguiente |
 | 7. Seguridad, empaquetado y publicación | Pendiente |
 
 ## Arquitectura
@@ -162,7 +162,16 @@ Alcance original:
 Ver secciones, recursos y actividades de cada curso; subir archivos/recursos, renombrar secciones,
 mostrar/ocultar elementos, con confirmación antes de cambios.
 
-### 4. Entregas y calificación
+### 4. Entregas y calificación ✅
+Implementado (con autorización de Florida): pestaña «Entregas y notas» en cada curso → tarea →
+lista de participantes con filtros (entregados, sin entregar, con retraso, sin nota), archivos
+descargables a la tablet, texto en línea, y nota + comentario + notificar con confirmación. Lectura
+de la tabla «Ver todas las entregas» (todas las páginas); calificación con el formulario clásico
+`action=grade`. Datos del alumnado sin persistencia (ver PRIVACIDAD.md §6). API:
+`GET /api/courses/{id}/assign/{cmid}/submissions`, `POST …/grade`, `GET …/file?url=`.
+Código en `backend/app/moodle/grading.py`; selectores en `selectors.py` (sección FASE 4).
+
+Alcance original:
 Listar entregas por tarea (pendientes, entregadas, con retraso), descargar entregas al PC,
 calificar y añadir retroalimentación desde la tablet. **Trata datos del alumnado**: requiere
 autorización expresa de Florida, minimización (descargar solo lo necesario y borrarlo después),

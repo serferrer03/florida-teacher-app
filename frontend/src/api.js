@@ -54,6 +54,23 @@ export const api = {
     files.forEach((f) => fd.append('files', f, f.name))
     return request('POST', `/api/courses/${courseId}/resources`, fd)
   },
+  submissions: (courseId, cmid) => request('GET', `/api/courses/${courseId}/assign/${cmid}/submissions`),
+  grade: (courseId, cmid, body) => request('POST', `/api/courses/${courseId}/assign/${cmid}/grade`, body),
+  // Descarga a través del PC (sin guardarla allí): se abre en la tablet desde memoria
+  downloadFile: async (courseId, cmid, file) => {
+    let res
+    try {
+      res = await fetch(`/api/courses/${courseId}/assign/${cmid}/file?url=${encodeURIComponent(file.url)}`,
+        { headers: { 'X-App-Token': getToken() }, cache: 'no-store' })
+    } catch { throw new ApiError(0, 'No se puede contactar con el PC') }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new ApiError(res.status, data.detail || `Error ${res.status}`)
+    }
+    const url = URL.createObjectURL(await res.blob())
+    const a = document.createElement('a'); a.href = url; a.download = file.name; a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 60000)
+  },
   templates: () => request('GET', '/api/templates'),
   saveTemplate: (name, data) => request('POST', '/api/templates', { name, data }),
   deleteTemplate: (id) => request('DELETE', `/api/templates/${id}`),

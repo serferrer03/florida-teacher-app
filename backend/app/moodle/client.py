@@ -511,3 +511,20 @@ class MoodleClient:
         from . import calendar
         async with self.session(creds) as page:
             return await calendar.month_events(page, self.base, year, month)
+
+    # ------------------------------------- Fase 4: entregas y calificación
+    async def submissions(self, creds: Credentials | None, cmid: int) -> list[dict]:
+        from . import grading
+        async with self.session(creds) as page:
+            return await grading.list_submissions(page, self.base, cmid)
+
+    async def save_grade(self, creds: Credentials | None, cmid: int, userid: int, grade: float | None,
+                         feedback: str | None, notify: bool) -> None:
+        from . import grading
+        async with self.session(creds) as page:
+            await grading.save_grade(page, self.base, cmid, userid, grade, feedback, notify)
+
+    async def submission_file(self, creds: Credentials | None, url: str) -> tuple[bytes, str]:
+        from . import grading
+        async with self.session(creds) as page:
+            return await grading.fetch_file(page, self.base, url)

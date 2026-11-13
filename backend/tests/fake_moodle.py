@@ -216,6 +216,66 @@ async function upload() {{
 }}
 </script></body></html>""")
 
+        # ------------------------------------------- Fase 4: entregas
+        students = [
+            {"id": 41, "name": "Ana Pérez", "status": "Enviado para calificar", "cls": "submissionstatussubmitted",
+             "late": True, "file": "ana_practica.pdf"},
+            {"id": 42, "name": "Luis Gómez", "status": "No entregado", "cls": "submissionstatus", "late": False, "file": None},
+        ] + [{"id": 100 + i, "name": f"Alumno {i:02d}", "status": "No entregado", "cls": "submissionstatus",
+              "late": False, "file": None} for i in range(12)]
+        self.grades: dict[int, dict] = {}
+
+        @app.get("/mod/assign/view.php")
+        def assign_view(req: Request, id: int, action: str = "", page: int = 0, userid: int = 0):
+            if not logged(req):
+                return RedirectResponse("/login/index.php", status_code=303)
+            head = f"<script>window.M={{cfg:{{sesskey:'{SESSKEY}'}}}}</script>"
+            if action == "grading":
+                rows = ""
+                for s in students[page * 10:(page + 1) * 10]:
+                    late = '<div class="latesubmission">Enviado con 2 días de retraso</div>' if s["late"] else ""
+                    f = (f'<a href="/pluginfile.php/99/assignsubmission_file/submission_files/1/{s["file"]}">{s["file"]}</a>'
+                         if s["file"] else "")
+                    g = self.grades.get(s["id"], {})
+                    rows += (f'<tr><td><input type="checkbox" name="selectedusers" value="{s["id"]}"></td>'
+                             f'<td><a href="/user/view.php?id={s["id"]}&course=7">{s["name"]}</a></td>'
+                             f'<td>{s["name"].lower().replace(" ", ".")}@alumnos.example</td>'
+                             f'<td><div class="{s["cls"]}">{s["status"]}</div>{late}</td>'
+                             f'<td>{g.get("grade", "-")} / 10,00</td><td>lunes, 1 de diciembre</td>'
+                             f'<td>{f}</td><td>{g.get("feedback", "")}</td><td>-</td></tr>')
+                if not rows:
+                    rows = '<tr class="emptyrow"><td></td></tr>'
+                return HTMLResponse(f"""<html lang="es"><body>{head}<table class="generaltable"><thead><tr>
+<th>Seleccionar</th><th>Nombre / Apellido(s)</th><th>Dirección de correo</th><th>Estado</th><th>Calificación</th>
+<th>Última modificación (entrega)</th><th>Archivos enviados</th><th>Comentarios de retroalimentación</th>
+<th>Calificación final</th></tr></thead><tbody>{rows}</tbody></table></body></html>""")
+            if action == "grade":
+                return HTMLResponse(f"""<html lang="es"><body>{head}<form class="mform" method="post"
+action="/mod/assign/grade?cmid={id}&userid={userid}"><input id="id_grade" name="grade">
+<textarea id="id_assignfeedbackcomments_editor" name="assignfeedbackcomments_editor[text]"></textarea>
+<input type="checkbox" id="id_sendstudentnotifications" name="sendstudentnotifications" value="1" checked>
+<input type="submit" id="id_savegrade" value="Guardar cambios"></form></body></html>""")
+            return HTMLResponse(f'<html><body><a id="user-menu-toggle"></a><h2>Tarea {id}</h2>{head}</body></html>')
+
+        @app.post("/mod/assign/grade")
+        async def grade_post(req: Request, cmid: int, userid: int):
+            form = dict((await req.form()).multi_items())
+            g = form.get("grade", "")
+            try:
+                if g:
+                    float(g.replace(",", "."))
+            except ValueError:
+                return HTMLResponse('<html><body><div id="id_error_grade" class="invalid-feedback">Nota no válida</div></body></html>')
+            self.grades[userid] = {"grade": g, "feedback": form.get("assignfeedbackcomments_editor[text]", ""),
+                                   "notify": form.get("sendstudentnotifications") == "1"}
+            return RedirectResponse(f"/mod/assign/view.php?id={cmid}&action=grading", status_code=303)
+
+        @app.get("/pluginfile.php/{rest:path}")
+        def pluginfile(req: Request, rest: str):
+            if not logged(req):
+                return HTMLResponse("login", status_code=403)
+            return HTMLResponse(b"%PDF entrega", media_type="application/pdf")
+
         @app.post("/repository/upload")
         async def repo_upload(req: Request):
             form = await req.form()
@@ -240,10 +300,6 @@ async function upload() {{
             self.created.append(form)
             return RedirectResponse(f"/mod/assign/view.php?id={cmid}", status_code=303)
 
-        @app.get("/mod/assign/view.php")
-        def assign_view(req: Request, id: int):
-            return HTMLResponse(f'<html><body><a id="user-menu-toggle"></a><h2>Tarea {id}</h2>'
-                                f"<script>window.M={{cfg:{{sesskey:'{SESSKEY}'}}}}</script></body></html>")
 
         # ------------------------------------------- Microsoft (simulado)
         @app.get("/ms/login")

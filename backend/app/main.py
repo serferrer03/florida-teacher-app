@@ -18,10 +18,11 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote, unquote, urlparse
 from typing import Literal
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
@@ -470,6 +471,49 @@ async def add_resource(course_id: int, data: str = Form(...),
     return {"ok": True}
 
 
+# ------------------------------------- Fase 4: entregas y calificación
+# Datos del alumnado: se piden a Florida Oberta en cada consulta y no se guardan
+# en el PC (ni BD, ni disco, ni registros, ni caché: Cache-Control no-store).
+class GradeIn(BaseModel):
+    userid: int
+    grade: float | None = Field(default=None, ge=0, le=10000)
+    feedback: str | None = Field(default=None, max_length=20000)
+    notify: bool = False
+
+
+@app.get("/api/courses/{course_id}/assign/{cmid}/submissions", dependencies=auth)
+async def submissions(course_id: int, cmid: int) -> dict:
+    known_course(course_id)
+    rows = await moodle_call(get_moodle().submissions(stored_credentials(), cmid))
+    counts = {"total": len(rows), "submitted": sum(r["submitted"] for r in rows),
+              "late": sum(r["late"] for r in rows), "files": sum(len(r["files"]) for r in rows)}
+    log.info("Entregas consultadas: %d filas", counts["total"])  # solo recuentos
+    return {"submissions": rows, "counts": counts}
+
+
+@app.post("/api/courses/{course_id}/assign/{cmid}/grade", dependencies=auth)
+async def grade(course_id: int, cmid: int, body: GradeIn) -> dict:
+    known_course(course_id)
+    if body.grade is None and body.feedback is None:
+        raise HTTPException(422, "Indica una nota o un comentario")
+    await moodle_call(get_moodle().save_grade(stored_credentials(), cmid, body.userid, body.grade,
+                                              body.feedback, body.notify))
+    log.info("Calificación guardada en la actividad %s", cmid)
+    return {"ok": True}
+
+
+@app.get("/api/courses/{course_id}/assign/{cmid}/file", dependencies=auth)
+async def submission_file(course_id: int, cmid: int, url: str) -> Response:
+    """Pasa el archivo de Florida Oberta a la tablet sin guardarlo en el PC."""
+    known_course(course_id)
+    if "/assignsubmission_file/" not in urlparse(url).path:
+        raise HTTPException(400, "Solo se pueden descargar archivos de entregas")
+    body, ctype = await moodle_call(get_moodle().submission_file(stored_credentials(), url))
+    name = unquote(urlparse(url).path.rsplit("/", 1)[-1]) or "archivo"
+    return Response(body, media_type=ctype, headers={
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
+
+
 # --------------------------------------- Fase 5: plantillas y calendario
 class TemplateIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
@@ -534,7 +578,8 @@ def privacy() -> dict:
              "detail": f"{db.count_courses()} cursos (nombre, código, categoría, enlace)", "protection": "Base de datos local"},
         ],
         "not_stored": [
-            "Datos de estudiantes (no se leen en esta fase)",
+            "Datos del alumnado (nombres, entregas, archivos, notas): se consultan al momento en "
+            "Florida Oberta y no se guardan en el PC ni en la tablet",
             "Códigos de verificación de Microsoft (se usan una vez y se descartan)",
             "Analítica, telemetría o envíos a terceros: no existen",
         ],

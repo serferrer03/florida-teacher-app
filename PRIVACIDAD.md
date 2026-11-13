@@ -86,14 +86,23 @@ tiene servidor en Internet: todo ocurre entre tu tablet, tu PC, Florida Oberta y
    (Florida) debe valorar la notificación a la autoridad de control en un plazo de 72 horas
    (art. 33 RGPD), y para eso necesita saberlo enseguida.
 
-## 6. Fases futuras con datos del alumnado
+## 6. Datos del alumnado (Fase 4: entregas y calificación)
 
-A partir de la **Fase 4** (entregas y calificaciones) la app tocará datos del alumnado. Antes de
-activarla:
+Activada con la autorización de Florida. Cómo se tratan:
 
-- Autorización expresa de Florida para tratarlos en este dispositivo.
-- Solo se descargará lo necesario para cada acción y se borrará después (sin copias permanentes
-  por defecto); lo que se guarde, cifrado.
-- Calificaciones y comentarios se escriben directamente en Florida Oberta, que sigue siendo el
-  sistema oficial.
-- Se añadirá a la pestaña *Privacidad* el inventario y borrado de esos datos.
+- **Qué se lee:** nombre, estado de la entrega (entregado, retraso), nota, fecha de última
+  modificación, texto en línea, comentarios y archivos entregados de **una tarea**, solo cuando
+  abres «Entregas y notas». No se leen correos ni otros campos de identidad.
+- **Dónde se guarda: en ningún sitio.** Se piden a Florida Oberta en cada consulta y solo viven en
+  la memoria de la pantalla de la tablet. No van a la base de datos, ni a disco, ni a los
+  registros (la consola solo anota recuentos) ni a la caché (`Cache-Control: no-store`, el service
+  worker nunca cachea `/api`).
+- **Archivos entregados:** el PC los pide a Florida Oberta y los pasa a la tablet sin escribirlos en
+  disco. Al pulsar «⬇» se descargan **en la tablet**: bórralos de la carpeta Descargas cuando ya no
+  los necesites.
+- **Notas y comentarios:** se escriben directamente en Florida Oberta (sistema oficial), con
+  confirmación previa; la app no guarda copia.
+- La pestaña *Privacidad* lo refleja en «No se guarda».
+
+Recomendaciones: no califiques con la pantalla a la vista de terceros, cierra la app al terminar
+y no hagas capturas con datos del alumnado.
