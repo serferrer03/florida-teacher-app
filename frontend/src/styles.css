@@ -72,3 +72,18 @@ a.button { display: inline-flex; align-items: center; min-height: 48px; padding:
 .summary dd { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .summary { grid-template-columns: 1fr; } .summary dd { margin-bottom: 6px; } }
 .version { font-size: .75rem; font-weight: 500; color: var(--muted); margin-left: 6px; }
+.subtabs { margin: 4px 0 16px; }
+.contents { display: grid; gap: 12px; }
+.section-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.section-card header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.section-card .expand { font-size: 1.05rem; color: var(--text); text-align: left; }
+.actions { margin-left: auto; display: flex; flex-wrap: wrap; }
+.items { list-style: none; margin: 0; padding: 0; }
+.items li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 12px; border-bottom: 1px solid var(--border); }
+.items li:last-child { border-bottom: 0; }
+.items a { color: inherit; text-decoration: none; padding: 8px 0; flex: 1 1 260px; }
+.mod { display: inline-block; font-size: .75rem; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; margin-right: 6px; }
+.badge { font-size: .75rem; background: var(--border); border-radius: 999px; padding: 2px 8px; }
+.hidden-item > a, .hidden-item > header .expand { opacity: .6; }
+.pad { padding: 10px 14px; margin: 0; }
+button.link:disabled { opacity: .4; }

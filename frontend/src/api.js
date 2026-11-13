@@ -45,6 +45,15 @@ export const api = {
   privacy: () => request('GET', '/api/privacy'),
   assignOptions: (courseId, refresh = false) =>
     request('GET', `/api/courses/${courseId}/assign-options${refresh ? '?refresh=true' : ''}`),
+  contents: (courseId) => request('GET', `/api/courses/${courseId}/contents`),
+  setVisibility: (courseId, kind, id, visible) => request('POST', `/api/courses/${courseId}/visibility`, { kind, id, visible }),
+  rename: (courseId, kind, id, name) => request('POST', `/api/courses/${courseId}/rename`, { kind, id, name }),
+  addResource: (courseId, data, files) => {
+    const fd = new FormData()
+    fd.append('data', JSON.stringify(data))
+    files.forEach((f) => fd.append('files', f, f.name))
+    return request('POST', `/api/courses/${courseId}/resources`, fd)
+  },
   assignments: (courseId) => request('GET', `/api/courses/${courseId}/assignments`),
   createAssignment: (courseId, data, files) => {
     const fd = new FormData()

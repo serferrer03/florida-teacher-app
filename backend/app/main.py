@@ -18,6 +18,7 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
@@ -341,19 +342,11 @@ def safe_filename(name: str) -> str:
     return name[:150]
 
 
-@app.post("/api/courses/{course_id}/assignments", dependencies=auth)
-async def create_assignment(course_id: int, data: str = Form(...),
-                            files: list[UploadFile] = File(default=[])) -> dict:
-    known_course(course_id)
-    try:
-        assignment = AssignmentIn.model_validate(json.loads(data))
-    except (ValueError, ValidationError) as exc:
-        msg = exc.errors()[0]["msg"] if isinstance(exc, ValidationError) else "Datos no válidos"
-        raise HTTPException(422, msg.removeprefix("Value error, ")) from exc
+@asynccontextmanager
+async def temp_uploads(files: list[UploadFile]):
+    """Guarda los archivos solo el tiempo necesario para adjuntarlos y luego los borra."""
     if len(files) > MAX_FILES:
-        raise HTTPException(413, f"Máximo {MAX_FILES} archivos por tarea")
-
-    # Los archivos solo se guardan en el PC el tiempo necesario para adjuntarlos.
+        raise HTTPException(413, f"Máximo {MAX_FILES} archivos")
     tmp = settings.data_dir / "uploads" / secrets.token_hex(8)
     tmp.mkdir(parents=True, mode=0o700)
     try:
@@ -372,18 +365,109 @@ async def create_assignment(course_id: int, data: str = Form(...),
                         raise HTTPException(413, f"«{up.filename}» supera los 100 MB")
                     fh.write(chunk)
             paths.append(target)
+        yield paths
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def parse_json_model(model, data: str):
+    try:
+        return model.model_validate(json.loads(data))
+    except (ValueError, ValidationError) as exc:
+        msg = exc.errors()[0]["msg"] if isinstance(exc, ValidationError) else "Datos no válidos"
+        raise HTTPException(422, msg.removeprefix("Value error, ")) from exc
+
+
+@app.post("/api/courses/{course_id}/assignments", dependencies=auth)
+async def create_assignment(course_id: int, data: str = Form(...),
+                            files: list[UploadFile] = File(default=[])) -> dict:
+    known_course(course_id)
+    assignment = parse_json_model(AssignmentIn, data)
+
+    async with temp_uploads(files) as paths:
         values = to_form_values(assignment)
         try:
             result = await get_moodle().create_assignment(stored_credentials(), course_id, values, paths)
         except MoodleError as exc:
             raise moodle_http_error(exc) from exc
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
 
     db.add_assignment(course_id, result["cmid"], assignment.name, assignment.due, result["url"],
-                      len(paths), values["availability"] is not None)
+                      len(files), values["availability"] is not None)
     log.info("Tarea creada en el curso %s (cmid %s)", course_id, result["cmid"])
     return {**result, "name": assignment.name}
+
+
+# ------------------------------------------------------ Fase 3: contenidos
+Kind = Literal["cm", "section"]
+
+
+class VisibilityIn(BaseModel):
+    kind: Kind
+    id: int
+    visible: bool
+
+
+class RenameIn(BaseModel):
+    kind: Kind
+    id: int
+    name: str = Field(min_length=1, max_length=255)
+
+
+class ResourceIn(BaseModel):
+    type: Literal["file", "url"]
+    name: str = Field(min_length=1, max_length=255)
+    description: str = Field(default="", max_length=20000)
+    show_description: bool = False
+    section: int = Field(default=0, ge=0, le=1000)
+    visible: bool = True
+    url: str | None = Field(default=None, max_length=2000, pattern=r"^https?://\S+$")
+
+
+async def moodle_call(coro):
+    try:
+        return await coro
+    except MoodleError as exc:
+        raise moodle_http_error(exc) from exc
+
+
+@app.get("/api/courses/{course_id}/contents", dependencies=auth)
+async def course_contents(course_id: int) -> dict:
+    known_course(course_id)
+    return {"sections": await moodle_call(get_moodle().course_contents(stored_credentials(), course_id))}
+
+
+@app.post("/api/courses/{course_id}/visibility", dependencies=auth)
+async def set_visibility(course_id: int, body: VisibilityIn) -> dict:
+    known_course(course_id)
+    await moodle_call(get_moodle().set_visibility(stored_credentials(), course_id, body.kind, body.id, body.visible))
+    log.info("Visibilidad cambiada en el curso %s", course_id)
+    return {"ok": True}
+
+
+@app.post("/api/courses/{course_id}/rename", dependencies=auth)
+async def rename_item(course_id: int, body: RenameIn) -> dict:
+    known_course(course_id)
+    name = " ".join(body.name.split())
+    if not name:
+        raise HTTPException(422, "El nombre no puede estar vacío")
+    await moodle_call(get_moodle().rename(stored_credentials(), course_id, body.kind, body.id, name))
+    return {"ok": True}
+
+
+@app.post("/api/courses/{course_id}/resources", dependencies=auth)
+async def add_resource(course_id: int, data: str = Form(...),
+                       files: list[UploadFile] = File(default=[])) -> dict:
+    known_course(course_id)
+    res = parse_json_model(ResourceIn, data)
+    if res.type == "file" and not files:
+        raise HTTPException(422, "Elige al menos un archivo")
+    if res.type == "url" and not res.url:
+        raise HTTPException(422, "Escribe la dirección (https://…)")
+    async with temp_uploads(files if res.type == "file" else []) as paths:
+        await moodle_call(get_moodle().add_resource(
+            stored_credentials(), course_id, {**res.model_dump(), "name": " ".join(res.name.split())}, paths))
+    log.info("Recurso añadido en el curso %s", course_id)
+    return {"ok": True}
 
 
 # -------------------------------------------------------------- privacidad

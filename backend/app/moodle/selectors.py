@@ -66,7 +66,7 @@ COURSE_SECTION = "li.section[id^='section-'], li.course-section[id^='section-']"
 COURSE_SECTION_NAME = ".sectionname, [data-for='section_title'], h3"
 
 # Formulario estándar de Moodle para añadir una tarea
-ASSIGN_ADD_PATH = "/course/modedit.php?add=assign&type=&course={course}&section={section}&return=0&sr=0"
+MODEDIT_ADD_PATH = "/course/modedit.php?add={mod}&type=&course={course}&section={section}&return=0&sr=0"
 ASSIGN_VIEW_PATH = "/mod/assign/view.php?id={cmid}"
 MODEDIT_FORM = "form.mform"
 # ids de los campos (formslib: id_<nombre>)
@@ -94,8 +94,9 @@ ASSIGN_SUBMIT = "#id_submitbutton"          # "Guardar cambios y mostrar"
 FORM_ERRORS = "[id^='id_error_'], .invalid-feedback, span.error, .alert-danger"
 
 # "Archivos adicionales" (filemanager introattachments) y selector de archivos
-ATTACH_ADD = "#fitem_id_introattachments .fp-btn-add a, #fitem_id_introattachments .fp-btn-add button"
-ATTACH_FILENAME = "#fitem_id_introattachments .fp-filename"
+# {field}: introattachments (tarea) o files (recurso Archivo)
+FILEMANAGER_ADD = "#fitem_id_{field} .fp-btn-add a, #fitem_id_{field} .fp-btn-add button"
+FILEMANAGER_FILENAME = "#fitem_id_{field} .fp-filename"
 PICKER_DIALOG = ".file-picker"
 PICKER_UPLOAD_REPO = ".fp-repo:has-text('Subir un archivo'), .fp-repo:has-text('Upload a file')"
 PICKER_FILE_INPUT = "input[type='file'][name='repo_upload_file']"
@@ -114,3 +115,20 @@ JS_AVAILABILITY_OPTIONS = """() => {
     grades: g(M_.availability_grade, 'grades'),
   };
 }"""
+
+# ================== FASE 3: CONTENIDOS DEL CURSO ===========================
+# Llamadas AJAX internas (las mismas que usa el editor de cursos de Moodle 4.x)
+AJAX_COURSE_STATE = "core_courseformat_get_state"          # temas y actividades (JSON)
+AJAX_COURSE_UPDATE = "core_courseformat_update_course"     # cm_hide/cm_show/section_hide/section_show
+AJAX_EDIT_MODULE = "core_course_edit_module"               # alternativa (Moodle 3.x): hide/show
+AJAX_EDIT_SECTION = "core_course_edit_section"             # alternativa (Moodle 3.x): hide/show
+AJAX_INPLACE = "core_update_inplace_editable"              # renombrar (activityname / sectionname)
+# Formato del curso para renombrar temas (format_topics, format_weeks...)
+JS_COURSE_FORMAT = "() => ((document.body.className.match(/\\bformat-([a-z0-9_]+)/) || [])[1] || 'topics')"
+
+# Recurso «Archivo» (mod_resource) y «URL» (mod_url)
+RESOURCE_FIELDS = {"name": "id_name", "intro": "id_introeditor", "visible": "id_visible",
+                   "showdescription": "id_showdescription"}
+RESOURCE_FILES_FIELD = "files"            # filemanager #fitem_id_files
+URL_FIELD = "id_externalurl"
+RETURN_TO_COURSE_SUBMIT = "#id_submitbutton2"   # "Guardar cambios y regresar al curso"

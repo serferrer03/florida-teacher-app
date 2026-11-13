@@ -125,13 +125,13 @@ async def read_sections(page: Page, base: str, course_id: int) -> list[dict]:
     return out or [{"number": 0, "name": "General"}]
 
 
-async def open_add_form(page: Page, base: str, course_id: int, section: int) -> None:
-    await page.goto(base + S.ASSIGN_ADD_PATH.format(course=course_id, section=section),
+async def open_add_form(page: Page, base: str, course_id: int, section: int, mod: str = "assign") -> None:
+    await page.goto(base + S.MODEDIT_ADD_PATH.format(mod=mod, course=course_id, section=section),
                     wait_until="domcontentloaded")
     try:
         await page.locator(S.MODEDIT_FORM).first.wait_for(timeout=20000)
     except PlaywrightTimeout as exc:
-        raise MoodleError("No se pudo abrir el formulario de nueva tarea (¿permisos de edición en el curso?)") from exc
+        raise MoodleError("No se pudo abrir el formulario de Moodle (¿permisos de edición en el curso?)") from exc
     if not await page.locator(f"#{S.ASSIGN_FIELDS['name']}").count():
         raise MoodleError("El formulario de tarea no tiene el aspecto esperado; revisa ASSIGN_FIELDS en selectors.py")
 
@@ -156,12 +156,14 @@ async def read_form_options(page: Page) -> dict:
     }
 
 
-async def attach_files(page: Page, files: list[Path]) -> None:
+async def attach_files(page: Page, files: list[Path], field: str = "introattachments") -> None:
+    add_sel = S.FILEMANAGER_ADD.format(field=field)
+    names_sel = S.FILEMANAGER_FILENAME.format(field=field)
     for path in files:
-        before = await page.locator(S.ATTACH_FILENAME).count()
-        add = page.locator(visible(S.ATTACH_ADD)).first
+        before = await page.locator(names_sel).count()
+        add = page.locator(visible(add_sel)).first
         if not await add.count():
-            raise MoodleError("No se encontró «Archivos adicionales» en el formulario (ATTACH_ADD)")
+            raise MoodleError(f"No se encontró el selector de archivos «{field}» en el formulario")
         await add.click()
         dialog = page.locator(visible(S.PICKER_DIALOG)).first
         await dialog.wait_for(timeout=15000)
@@ -173,7 +175,7 @@ async def attach_files(page: Page, files: list[Path]) -> None:
         try:
             await page.wait_for_function(
                 "([sel, n]) => document.querySelectorAll(sel).length > n",
-                arg=[S.ATTACH_FILENAME, before], timeout=120000,
+                arg=[names_sel, before], timeout=120000,
             )
         except PlaywrightTimeout as exc:
             err = page.locator(visible(S.PICKER_ERROR)).first
@@ -183,16 +185,23 @@ async def attach_files(page: Page, files: list[Path]) -> None:
 
 
 async def submit(page: Page) -> int:
+    await submit_form(page, S.ASSIGN_SUBMIT, "/mod/assign/view.php")
+    ids = parse_qs(urlparse(page.url).query).get("id")
+    if ids and ids[0].isdigit():
+        return int(ids[0])
+    raise MoodleError("Moodle no devolvió el id de la tarea creada")
+
+
+async def submit_form(page: Page, button: str, success_path: str) -> None:
+    """Envía un formulario de Moodle; si vuelve con errores, los devuelve en la excepción."""
     async with page.expect_navigation(wait_until="domcontentloaded", timeout=120000):
-        await page.locator(S.ASSIGN_SUBMIT).first.click()
-    if "/mod/assign/view.php" in page.url:
-        ids = parse_qs(urlparse(page.url).query).get("id")
-        if ids and ids[0].isdigit():
-            return int(ids[0])
+        await page.locator(button).first.click()
+    if success_path in page.url:
+        return
     errors = await page.evaluate(
         """(sel) => [...document.querySelectorAll(sel)]
              .map(e => e.textContent.trim()).filter(t => t && t.length < 300)""",
         S.FORM_ERRORS,
     )
     detail = "; ".join(dict.fromkeys(errors)) or "Moodle no confirmó la creación"
-    raise MoodleError(f"Moodle rechazó la tarea: {detail}")
+    raise MoodleError(f"Moodle rechazó el formulario: {detail}")

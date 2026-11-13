@@ -8,9 +8,9 @@ corre en el PC del profesor y la tablet lo usa como PWA a través de la red loca
 | Fase | Estado |
 |------|--------|
 | 1. Base: login Microsoft (Office 365) y listado de cursos | ✅ Hecha |
-| 2. Creación de tareas (fechas, archivos, restricciones) | ✅ Hecha (pendiente de validar con Florida Oberta real) |
-| 3. Contenidos del curso | ⏭️ Siguiente |
-| 4. Entregas y calificación | Pendiente |
+| 2. Creación de tareas (fechas, archivos, restricciones) | ✅ Hecha y validada |
+| 3. Contenidos del curso | ✅ Hecha (pendiente de validar con Florida Oberta real) |
+| 4. Entregas y calificación | ⏭️ Siguiente |
 | 5. Planificación, plantillas y calendario | Pendiente |
 | 6. Robustez y usabilidad | Pendiente |
 | 7. Seguridad, empaquetado y publicación | Pendiente |
@@ -148,7 +148,17 @@ Crear actividades «Tarea» (`mod/assign`) en un curso desde la tablet:
 - Privacidad: los archivos subidos se guardan en el PC solo hasta adjuntarlos y luego se borran;
   restricciones por grupo usan solo el nombre/id del grupo, sin listar alumnado.
 
-### 3. Contenidos del curso
+### 3. Contenidos del curso ✅
+Implementado: pestaña «Contenidos» en cada curso con temas y elementos (tipo, nombre, visibilidad),
+mostrar/ocultar y renombrar temas y elementos (con confirmación), y añadir Archivo o Enlace a un
+tema. Lectura con `core_courseformat_get_state` (alternativa: página del curso); cambios con
+`core_courseformat_update_course` (alternativa `core_course_edit_module/section`) y
+`core_update_inplace_editable`; recursos con `modedit.php` (`mod_resource`, `mod_url`). API:
+`GET /api/courses/{id}/contents`, `POST …/visibility`, `POST …/rename`, `POST …/resources`.
+Código en `backend/app/moodle/contents.py`; nombres en `selectors.py` (sección FASE 3).
+No se borra nada desde la app.
+
+Alcance original:
 Ver secciones, recursos y actividades de cada curso; subir archivos/recursos, renombrar secciones,
 mostrar/ocultar elementos, con confirmación antes de cambios.
 

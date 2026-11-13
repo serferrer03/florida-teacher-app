@@ -483,3 +483,25 @@ class MoodleClient:
                 await assign.attach_files(page, files)
             cmid = await assign.submit(page)
             return {"cmid": cmid, "url": self.url(S.ASSIGN_VIEW_PATH.format(cmid=cmid))}
+
+    # ---------------------------------------------- Fase 3: contenidos
+    async def course_contents(self, creds: Credentials | None, course_id: int) -> list[dict]:
+        from . import contents
+        async with self.session(creds) as page:
+            return await contents.read_contents(page, self.base, course_id)
+
+    async def set_visibility(self, creds: Credentials | None, course_id: int, kind: str,
+                             item_id: int, visible: bool) -> None:
+        from . import contents
+        async with self.session(creds) as page:
+            await contents.set_visibility(page, self.base, course_id, kind, item_id, visible)
+
+    async def rename(self, creds: Credentials | None, course_id: int, kind: str, item_id: int, name: str) -> None:
+        from . import contents
+        async with self.session(creds) as page:
+            await contents.rename(page, self.base, course_id, kind, item_id, name)
+
+    async def add_resource(self, creds: Credentials | None, course_id: int, values: dict, files: list) -> None:
+        from . import contents
+        async with self.session(creds) as page:
+            await contents.add_resource(page, self.base, course_id, values, files)

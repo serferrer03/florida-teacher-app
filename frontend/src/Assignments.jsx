@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from './api.js'
+import { ContentsView } from './Contents.jsx'
 
 // ------------------------------------------------------------ utilidades
 const pad = (n) => String(n).padStart(2, '0')
@@ -272,6 +273,7 @@ export function CourseDetail({ course, onBack, onNeedLogin }) {
   const [options, setOptions] = useState(null)
   const [list, setList] = useState([])
   const [mode, setMode] = useState('list')  // list | form | done
+  const [tab, setTab] = useState('contents')  // contents | assignments
   const [created, setCreated] = useState(null)
   const [error, setError] = useState('')
 
@@ -325,8 +327,15 @@ export function CourseDetail({ course, onBack, onNeedLogin }) {
       )}
 
       {mode === 'list' && (
+        <nav className="tabs subtabs">
+          <button className={tab === 'contents' ? 'tab active' : 'tab'} onClick={() => setTab('contents')}>Contenidos</button>
+          <button className={tab === 'assignments' ? 'tab active' : 'tab'} onClick={() => setTab('assignments')}>Tareas creadas desde la app</button>
+        </nav>
+      )}
+      {mode === 'list' && tab === 'contents' && <ContentsView course={course} onNeedLogin={onNeedLogin} />}
+
+      {mode === 'list' && tab === 'assignments' && (
         <>
-          <h3>Tareas creadas desde la app</h3>
           {list.length === 0
             ? <p className="muted">Todavía no has creado tareas en este curso desde la app.</p>
             : (

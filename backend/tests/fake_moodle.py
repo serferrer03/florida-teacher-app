@@ -31,6 +31,17 @@ class FakeMoodle:
         self.ajax_empty = False
         self.email_glitches = 0
         self.created: list[dict] = []   # tareas recibidas por el formulario
+        self.state_api = True            # core_courseformat_get_state disponible
+        self.sections = [
+            {"id": 100, "number": 0, "title": "General", "visible": True, "cmlist": [1]},
+            {"id": 101, "number": 1, "title": "Tema 1: Introducción", "visible": True, "cmlist": [2, 3]},
+        ]
+        self.cms = {
+            1: {"id": 1, "name": "Avisos", "module": "forum", "visible": True},
+            2: {"id": 2, "name": "Apuntes T1", "module": "resource", "visible": True},
+            3: {"id": 3, "name": "Práctica 0", "module": "assign", "visible": False},
+        }
+        self.inplace: list[dict] = []
         self.uploads: dict[str, bytes] = {}
         self.mode = "microsoft"
         self.mfa: str | None = None
@@ -111,7 +122,13 @@ class FakeMoodle:
             return HTMLResponse(f'<html><body><div data-region="courses-view">{items}</div></body></html>')
 
         @app.post("/lib/ajax/service.php")
-        def ajax(req: Request, sesskey: str = ""):
+        async def ajax(req: Request, sesskey: str = ""):
+            call = (await req.json())[0]
+            method, args = call["methodname"], call["args"]
+            if method != "core_course_get_enrolled_courses_by_timeline_classification":
+                if not logged(req) or sesskey != SESSKEY:
+                    return JSONResponse([{"error": True, "exception": {"errorcode": "invalidsesskey"}}])
+                return JSONResponse([self.content_call(method, args)])
             if not self.ajax_enabled:
                 return JSONResponse({"error": "disabled"}, status_code=500)
             if not logged(req) or sesskey != SESSKEY:
@@ -125,7 +142,8 @@ class FakeMoodle:
         def course_view(req: Request, id: int):
             if not logged(req):
                 return RedirectResponse("/login/index.php", status_code=303)
-            return HTMLResponse("""<html><body><ul>
+            return HTMLResponse(f"""<html><body class="format-topics"><a id="user-menu-toggle"></a>
+<script>window.M={{cfg:{{sesskey:'{SESSKEY}'}}}}</script><ul>
 <li id="section-0" class="section"><h3 class="sectionname">General</h3></li>
 <li id="section-1" class="section"><h3 class="sectionname">Tema 1: Introducción</h3></li>
 <li id="section-2" class="section"><h3 class="sectionname">Tema 2</h3></li></ul></body></html>""")
@@ -140,9 +158,11 @@ class FakeMoodle:
                     + "".join(f'<option value="{m}">{m:02d}</option>' for m in range(0, 60, 5)) + "</select>")
 
         @app.get("/course/modedit.php")
-        def modedit(req: Request, course: int = 0, section: int = 0, error: str = ""):
+        def modedit(req: Request, course: int = 0, section: int = 0, error: str = "", add: str = "assign"):
             if not logged(req):
                 return RedirectResponse("/login/index.php", status_code=303)
+            if add in ("resource", "url"):
+                return HTMLResponse(self.resource_form(course, section, add))
             err = f'<div class="invalid-feedback" id="id_error_name">{error}</div>' if error else ""
             dates = "".join(date_fields(b, b != "cutoffdate") for b in
                             ("allowsubmissionsfromdate", "duedate", "cutoffdate", "gradingduedate"))
@@ -206,6 +226,13 @@ async function upload() {{
         @app.post("/course/modedit.php")
         async def modedit_post(req: Request):
             form = dict((await req.form()).multi_items())
+            if form.get("modulename") in ("resource", "url"):
+                cmid = 900 + len(self.cms)
+                self.cms[cmid] = {"id": cmid, "name": form["name"], "module": form["modulename"],
+                                  "visible": form.get("visible") == "1", "form": form}
+                sec = next(s for s in self.sections if s["number"] == int(form["section"]))
+                sec["cmlist"].append(cmid)
+                return RedirectResponse(f"/course/view.php?id={form['course']}", status_code=303)
             if not form.get("name"):
                 return modedit(req, int(form.get("course", 0)), int(form.get("section", 0)),
                                "Falta incluir este campo")
@@ -298,6 +325,57 @@ async function upload() {{
             return RedirectResponse(moodle(req, "/auth/oauth2/callback"), status_code=303)
 
         return app
+
+    # --------------------------------------------- Fase 3 (contenidos)
+    def content_call(self, method: str, args: dict) -> dict:
+        import json as _json
+        if method == "core_courseformat_get_state":
+            if not self.state_api:
+                return {"error": True, "exception": {"errorcode": "servicenotavailable"}}
+            return {"error": False, "data": _json.dumps({"section": self.sections, "cm": list(self.cms.values())})}
+        if method == "core_courseformat_update_course":
+            kind, act = args["action"].split("_")
+            for i in args["ids"]:
+                target = self.cms[i] if kind == "cm" else next(s for s in self.sections if s["id"] == i)
+                target["visible"] = act == "show"
+            return {"error": False, "data": "[]"}
+        if method == "core_update_inplace_editable":
+            self.inplace.append(args)
+            if args["itemtype"] == "activityname":
+                self.cms[args["itemid"]]["name"] = args["value"]
+            else:
+                next(s for s in self.sections if s["id"] == args["itemid"])["title"] = args["value"]
+            return {"error": False, "data": {}}
+        return {"error": True, "exception": {"errorcode": "invalidparameter", "message": method}}
+
+    def resource_form(self, course: int, section: int, mod: str) -> str:
+        extra = ('<input id="id_externalurl" name="externalurl">' if mod == "url" else
+                 '<div id="fitem_id_files"><div class="fp-btn-add"><a href="#" onclick="openPicker();return false">'
+                 'Agregar</a></div><div class="fp-files"></div><input type="hidden" name="files" id="att"></div>')
+        return f"""<html><body>
+<form class="mform" method="post" action="/course/modedit.php">
+<input type="hidden" name="course" value="{course}"><input type="hidden" name="section" value="{section}">
+<input type="hidden" name="modulename" value="{mod}">
+<input id="id_name" name="name"><textarea id="id_introeditor" name="introeditor[text]"></textarea>
+<input type="checkbox" id="id_showdescription" name="showdescription" value="1">{extra}
+<select id="id_visible" name="visible"><option value="1">Mostrar</option><option value="0">Ocultar</option></select>
+<input type="submit" id="id_submitbutton2" name="submitbutton2" value="Guardar cambios y regresar al curso">
+</form>
+<div class="file-picker" id="picker" style="display:none"><div class="fp-repo"><a href="#">Subir un archivo</a></div>
+<input type="file" name="repo_upload_file" id="upfile"><button class="fp-upload-btn" onclick="upload();return false">Subir</button></div>
+<script>
+window.M = {{cfg: {{sesskey: '{SESSKEY}'}}}};
+function openPicker() {{ document.getElementById('picker').style.display = 'block'; }}
+async function upload() {{
+  const f = document.getElementById('upfile').files[0];
+  const fd = new FormData(); fd.append('repo_upload_file', f);
+  const r = await (await fetch('/repository/upload', {{method: 'POST', body: fd}})).json();
+  const d = document.createElement('div'); d.className = 'fp-filename'; d.textContent = r.name;
+  document.querySelector('#fitem_id_files .fp-files').appendChild(d);
+  const att = document.getElementById('att'); att.value = (att.value ? att.value + '|' : '') + r.name;
+  document.getElementById('upfile').value = ''; document.getElementById('picker').style.display = 'none';
+}}
+</script></body></html>"""
 
 
 def free_port() -> int:
