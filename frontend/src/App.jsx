@@ -178,9 +178,13 @@ function Courses({ status, onNeedLogin }) {
   }, [onNeedLogin])
 
   useEffect(() => {
-    api.courses().then((data) => { setCourses(data.courses); setSyncedAt(data.synced_at) })
-      .catch((err) => setError(err.message))
-  }, [])
+    const loginError = status.login?.result?.courses_error
+    if (loginError) setError(`Sesión iniciada, pero no se pudieron descargar los cursos: ${loginError}`)
+    api.courses().then((data) => {
+      setCourses(data.courses); setSyncedAt(data.synced_at)
+      if (data.courses.length === 0 && !loginError) sync()  // primera vez o lista vacía: intentar
+    }).catch((err) => setError(err.message))
+  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const q = filter.trim().toLowerCase()
   const visible = q
@@ -201,7 +205,14 @@ function Courses({ status, onNeedLogin }) {
         <input className="search" placeholder="Buscar curso…" value={filter}
           onChange={(e) => setFilter(e.target.value)} />
       )}
-      {!busy && courses.length === 0 && !error && <p className="muted">No hay cursos todavía. Pulsa «Actualizar».</p>}
+      {busy && courses.length === 0 && <p className="spinner">Descargando tus cursos de Florida Oberta…</p>}
+      {!busy && courses.length === 0 && !error && (
+        <p className="muted">
+          {syncedAt
+            ? 'Florida Oberta no devolvió ningún curso. Pulsa «Actualizar»; si sigue vacío, copia las líneas «Cursos vía…» de la consola del PC.'
+            : 'No hay cursos todavía. Pulsa «Actualizar».'}
+        </p>
+      )}
       <ul className="courses">
         {visible.map((c) => (
           <li key={c.id} className="course">

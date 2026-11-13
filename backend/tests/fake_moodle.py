@@ -28,6 +28,7 @@ class FakeMoodle:
     def __init__(self) -> None:
         self.logins = 0
         self.ajax_enabled = True
+        self.ajax_empty = False
         self.mode = "microsoft"
         self.mfa: str | None = None
         self.mfa_approved = False
@@ -37,6 +38,7 @@ class FakeMoodle:
     def reset(self, mode: str = "microsoft", mfa: str | None = None) -> None:
         self.mode, self.mfa, self.mfa_approved, self.kmsi_answer = mode, mfa, False, None
         self.ajax_enabled = True
+        self.ajax_empty = False
 
     def _build(self) -> FastAPI:
         app = FastAPI()
@@ -111,7 +113,7 @@ class FakeMoodle:
             if not logged(req) or sesskey != SESSKEY:
                 return JSONResponse([{"error": True, "exception": {"message": "sesskey"}}])
             base = str(req.base_url).rstrip("/")
-            courses = [{**c, "viewurl": f"{base}/course/view.php?id={c['id']}"} for c in COURSES]
+            courses = [] if self.ajax_empty else [{**c, "viewurl": f"{base}/course/view.php?id={c['id']}"} for c in COURSES]
             return JSONResponse([{"error": False, "data": {"courses": courses, "nextoffset": 2}}])
 
         # ------------------------------------------- Microsoft (simulado)

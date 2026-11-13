@@ -300,20 +300,28 @@ class MoodleClient:
     # ---------------------------------------------------------------- cursos
     async def list_courses(self, creds: Credentials | None) -> list[dict]:
         async with self.session(creds) as page:
-            courses = await self._courses_via_ajax(page)
-            if courses is None:
-                log.warning("AJAX de cursos no disponible; usando lectura del DOM")
-                courses = await self._courses_via_dom(page)
-            return courses
+            courses = None
+            for classification in ("all", "allincludinghidden"):
+                courses = await self._courses_via_ajax(page, classification)
+                log.info("Cursos vía AJAX (%s): %s", classification, "error" if courses is None else len(courses))
+                if courses:
+                    return courses
+            for path in (S.MY_COURSES_PATH, S.DASHBOARD_PATH):
+                courses = await self._courses_via_dom(page, path)
+                log.info("Cursos vía página %s: %d", path, len(courses))
+                if courses:
+                    return courses
+            log.warning("No se encontró ningún curso (url actual: %s)", urlparse(page.url).path)
+            return []
 
-    async def _courses_via_ajax(self, page: Page) -> list[dict] | None:
+    async def _courses_via_ajax(self, page: Page, classification: str = "all") -> list[dict] | None:
         sesskey = await page.evaluate(S.JS_SESSKEY)
         if not sesskey:
             return None
         payload = [{
             "index": 0,
             "methodname": S.AJAX_COURSES_METHOD,
-            "args": {"offset": 0, "limit": 0, "classification": "all", "sort": "fullname"},
+            "args": {"offset": 0, "limit": 0, "classification": classification, "sort": "fullname"},
         }]
         resp = await page.request.post(
             self.url(f"{S.AJAX_SERVICE_PATH}?sesskey={sesskey}&info={S.AJAX_COURSES_METHOD}"),
@@ -321,6 +329,7 @@ class MoodleClient:
             headers={"Content-Type": "application/json"},
         )
         if not resp.ok:
+            log.warning("AJAX de cursos: HTTP %s", resp.status)
             return None
         try:
             body = await resp.json()
@@ -328,7 +337,8 @@ class MoodleClient:
         except (ValueError, KeyError, IndexError, TypeError):
             return None
         if first.get("error"):
-            log.warning("Moodle AJAX devolvió un error para %s", S.AJAX_COURSES_METHOD)
+            exc = first.get("exception") or {}
+            log.warning("Moodle AJAX devolvió un error: %s", exc.get("errorcode") or exc.get("message"))
             return None
         out = []
         for c in first.get("data", {}).get("courses", []):
@@ -341,10 +351,10 @@ class MoodleClient:
             })
         return out
 
-    async def _courses_via_dom(self, page: Page) -> list[dict]:
-        await page.goto(self.url(S.MY_COURSES_PATH), wait_until="domcontentloaded")
+    async def _courses_via_dom(self, page: Page, path: str = S.MY_COURSES_PATH) -> list[dict]:
+        await page.goto(self.url(path), wait_until="domcontentloaded")
         try:
-            await page.locator(S.COURSE_LIST_READY).first.wait_for(timeout=self.settings.timeout_ms)
+            await page.locator(S.COURSE_LINK).first.wait_for(timeout=min(self.settings.timeout_ms, 15000))
         except PlaywrightTimeout:
             pass  # seguimos con lo que haya
         seen: dict[int, dict] = {}

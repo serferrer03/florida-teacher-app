@@ -32,7 +32,6 @@ USER_FULLNAME = "#user-menu-toggle .userinitials, .usermenu .usertext, .userbutt
 # --- Listado de cursos (alternativa por DOM si falla la llamada AJAX) -------
 COURSE_LINK = "a[href*='/course/view.php?id=']"
 COURSE_NAME = ".multiline, .coursename, [data-region='course-name']"
-COURSE_LIST_READY = "[data-region='courses-view'] [data-region='course-content'], [data-region='courses-view'] .empty-message, .coursebox"
 
 # --- Llamada AJAX interna de Moodle (la misma que usa el panel /my/) --------
 # No requiere token de servicios web: usa la cookie de sesión + sesskey.

@@ -85,7 +85,12 @@ Requisitos en el PC: Python 3.11+, Node 18+.
 2. La consola muestra la dirección para la tablet (`http://IP-DEL-PC:8000`) y el **código de
    acceso**. Ábrela en Chrome de la tablet (misma Wi-Fi), escribe el código, tu correo
    institucional y contraseña, y aprueba en Microsoft Authenticator si lo pide.
-3. Opcional: `MOODLE_HEADLESS=false` en `backend/.env` para ver el navegador en el PC.
+3. **En el PC** la interfaz se abre sola en una ventana propia (Edge/Chrome en modo app) en
+   `http://localhost:8000`, ya vinculada: el lanzador pasa el código en el fragmento `#code=`
+   (no llega al servidor y se borra de la barra). En Windows se crea además el acceso directo
+   «Florida Teacher App» en el escritorio. Desde Edge se puede instalar como app
+   (⋯ → Aplicaciones → Instalar).
+4. Opcional: `MOODLE_HEADLESS=false` en `backend/.env` para ver el navegador en el PC.
 
 Florida Oberta (`https://www.floridaoberta.com`) usa el botón «Conectar con Office 365»
 (`/auth/oidc/`) que redirige a `login.microsoftonline.com` (inquilino de Grupo Florida);

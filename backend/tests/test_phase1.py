@@ -142,3 +142,10 @@ def test_moodle_local_form_and_dom_fallback(client, fake):
     fake.ajax_enabled = False
     courses = run(client.list_courses(Credentials(USER, PASSWORD)))  # login silencioso sin MFA
     assert {c["id"]: c["fullname"] for c in courses} == {3: "Bases de datos", 7: "Programación DAM 1"}
+
+
+def test_empty_ajax_falls_back_to_page(client, fake):
+    fake.ajax_empty = True
+    run(client.interactive_login(Credentials(USER, PASSWORD), RecordingUI(), fresh=True))
+    courses = run(client.list_courses(Credentials(USER, None)))
+    assert {c["id"] for c in courses} == {3, 7}

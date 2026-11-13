@@ -31,6 +31,28 @@ if (-not (Get-NetFirewallRule -DisplayName "Florida Teacher App" -ErrorAction Si
   Start-Process powershell -Verb RunAs -Wait -ArgumentList "-NoProfile -Command New-NetFirewallRule -DisplayName 'Florida Teacher App' -Direction Inbound -Protocol TCP -LocalPort $port -Profile Private -Action Allow" -ErrorAction SilentlyContinue
 }
 
+# Acceso directo en el escritorio (una vez)
+$lnk = Join-Path ([Environment]::GetFolderPath("Desktop")) "Florida Teacher App.lnk"
+if (-not (Test-Path $lnk)) {
+  $sc = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+  $sc.TargetPath = Join-Path $PSScriptRoot "Iniciar.bat"
+  $sc.WorkingDirectory = $PSScriptRoot
+  $sc.Save()
+}
+
+# Abrir la interfaz en el PC cuando el servidor esté listo (ventana propia de Edge/Chrome)
+Start-Job -ArgumentList $PSScriptRoot, $port -ScriptBlock {
+  param($root, $port)
+  for ($i = 0; $i -lt 120; $i++) {
+    try { Invoke-RestMethod "http://localhost:$port/api/health" -TimeoutSec 2 | Out-Null; break } catch { Start-Sleep 1 }
+  }
+  $code = (Select-String -Path "$root\backend\.env" -Pattern '^APP_ACCESS_TOKEN=(.+)$' -ErrorAction SilentlyContinue).Matches.Groups[1].Value
+  if (-not $code) { $code = (Get-Content "$root\backend\data\access_code" -ErrorAction SilentlyContinue | Select-Object -First 1) }
+  $url = "http://localhost:$port/#code=$($code.Trim())"
+  try { Start-Process msedge -ArgumentList "--app=$url" } catch {
+    try { Start-Process chrome -ArgumentList "--app=$url" } catch { Start-Process $url } }
+} | Out-Null
+
 Set-Location backend
 $env:PORT = $port
 .venv\Scripts\uvicorn app.main:app --host 0.0.0.0 --port $port
