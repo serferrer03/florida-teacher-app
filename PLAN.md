@@ -1,32 +1,172 @@
 # Florida Teacher App — Plan
 
-## Architecture
+App para gestionar Florida Oberta (Moodle) desde una tablet Android. El servidor
+corre en el PC del profesor y la tablet lo usa como PWA a través de la red local.
 
-This project runs on the teacher's PC and is intended to be opened from a tablet on the same trusted local network.
+## Estado
 
-- **Backend:** FastAPI provides a small REST API, serves as the sole integration point with Florida Oberta, and stores app data in SQLite (`backend/data/app.db`).
-- **Moodle integration:** Playwright automates an ordinary browser login using the user's own credentials. Moodle-specific selectors live together in `backend/app/moodle/selectors.py` so they can be updated in one place. The Moodle base URL is configurable through `MOODLE_BASE_URL`; no API token is assumed.
-- **Credential and session storage:** Credentials are encrypted at rest with Fernet. The encryption key is generated locally and stored under `backend/data/`; neither credentials nor keys belong in source control. Playwright's reusable authenticated storage state is also kept under that local data directory. These files are sensitive and are excluded by `.gitignore`.
-- **Frontend:** React + Vite provides the setup/login and course-listing interface; the PWA manifest/service worker makes the app installable on Android. The UI communicates with FastAPI over the local network.
-- **Network/security boundary:** The backend may listen on the PC's LAN interface so a tablet can reach it. Use only on a trusted private network, keep the firewall enabled, and do not expose the service to the public internet. The initial local app has no user-account/authentication layer; adding one is a later-phase hardening item.
+| Fase | Estado |
+|------|--------|
+| 1. Base: login Microsoft (Office 365) y listado de cursos | ✅ Hecha |
+| 2. Creación de tareas (fechas, archivos, restricciones) | ⏭️ Siguiente |
+| 3. Contenidos del curso | Pendiente |
+| 4. Entregas y calificación | Pendiente |
+| 5. Planificación, plantillas y calendario | Pendiente |
+| 6. Robustez y usabilidad | Pendiente |
+| 7. Seguridad, empaquetado y publicación | Pendiente |
 
-## Run locally (development)
+## Arquitectura
 
-1. Configure `MOODLE_BASE_URL` to the Florida Oberta Moodle login/site URL.
-2. Install backend dependencies from `backend/requirements.txt`, install Playwright's Chromium browser, and start FastAPI on `0.0.0.0:8000`.
-3. Install frontend dependencies in `frontend/` and start Vite with host access enabled. Open the Vite URL from the tablet using the PC's LAN IP.
-4. Enter the Moodle username and password in the app. The backend encrypts and saves them locally, launches Playwright for login, and reuses the saved authenticated session on later course refreshes. If the session expires, log in again.
+```
+Tablet Android (PWA)  ──LAN/HTTP──▶  PC: FastAPI :8000  ──Playwright/HTTPS──▶  Florida Oberta (Moodle)
+                                        │
+                                        └─ backend/data/  (SQLite, clave Fernet, sesión del navegador)
+```
 
-## Seven phases
+- **Backend (`backend/`)**: FastAPI + SQLite (`backend/data/app.db`, sin ORM). Es el único punto
+  de integración con Florida Oberta. En producción también sirve la PWA compilada
+  (`frontend/dist`) en el mismo puerto.
+- **Integración Moodle sin token** (`backend/app/moodle/`): Florida Oberta inicia sesión con
+  **Microsoft (Office 365)**. Playwright (Chromium) recorre ese flujo como una persona: botón de
+  Microsoft en Moodle → correo → contraseña → verificación en dos pasos → «¿Mantener la sesión
+  iniciada?». La **MFA nunca se salta**: la tablet muestra el número de Microsoft Authenticator o
+  pide el código, y el profesor aprueba en su móvil. El login corre en segundo plano y la tablet
+  consulta su estado. Las cookies (Moodle + Microsoft) se guardan **cifradas** en
+  `backend/data/session.enc`, se reutilizan y caducan a los `SESSION_MAX_DAYS` días. Si la sesión
+  caduca, se reintenta en silencio; si Microsoft pide MFA, la API responde 409 y la tablet pide
+  reconectar. Alternativas: `LOGIN_MODE=moodle` (formulario propio de Moodle) y «login manual»
+  en una ventana de Chromium del PC para cuentas con métodos no soportados. Los cursos se obtienen con la misma llamada AJAX interna que usa el panel de
+  Moodle (`core_course_get_enrolled_courses_by_timeline_classification`, con cookie + `sesskey`,
+  sin token de servicios web) y, si falla, leyendo los enlaces de `/my/courses.php`.
+- **Selectores centralizados**: todas las rutas y selectores CSS de Moodle están en
+  `backend/app/moodle/selectors.py`. Si Florida Oberta cambia de tema o versión, solo se toca ese
+  archivo.
+- **Credenciales cifradas**: la contraseña **solo se guarda si el profesor marca «Recordar
+  contraseña»**, y entonces cifrada con Fernet. La clave se genera en el primer arranque en
+  `backend/data/secret.key` (permisos 600, carpeta 700). La API nunca devuelve la contraseña.
+  Todo `backend/data/` y `backend/.env` están en `.gitignore`.
+- **Protección de datos**: ver [PRIVACIDAD.md](PRIVACIDAD.md) (RGPD/LOPDGDD: minimización,
+  cifrado, caducidad, derecho de acceso y supresión desde la pestaña *Privacidad*, y pasos que
+  debe dar el profesor, empezando por la autorización de Florida).
+- **Frontend (`frontend/`)**: React + Vite + `vite-plugin-pwa` (manifest, service worker, iconos).
+  Las llamadas `/api` nunca se cachean. En desarrollo Vite hace de proxy de `/api` hacia el PC.
+- **Acceso en la red local**: el servidor escucha en `0.0.0.0`. Toda la API exige un **código de
+  emparejamiento** (cabecera `X-App-Token`): se genera al azar en el primer arranque
+  (`backend/data/access_code`, se muestra en la consola) o se fija con `APP_ACCESS_TOKEN`. La
+  tablet lo pide una vez. 5 intentos fallidos bloquean la IP 5 minutos. Sin CORS, con cabeceras de
+  seguridad (CSP, `no-store`). Úsalo solo en una red privada y nunca lo expongas a Internet.
 
-1. **Foundation (current):** FastAPI + SQLite, React/Vite installable PWA, local encrypted credential storage, Playwright login/session reuse, centralized selectors, and first course list.
-2. **Course detail:** Navigate course pages and present relevant sections, resources, and activities.
-3. **Teacher workflows:** Add safe, explicit workflows for common teaching tasks, with confirmation before consequential changes.
-4. **Files and materials:** Organize, preview, and download course materials with clear local storage controls.
-5. **Planning and reminders:** Add schedules, deadlines, and configurable local reminders.
-6. **Resilience and usability:** Improve offline behavior, tablet accessibility, session-expiry recovery, and Moodle selector diagnostics.
-7. **Hardening and release:** Add local app authentication, stronger secret/key management and backup guidance, tests, packaging/startup tooling, and security review before wider use.
+### API (Fase 1)
 
-## Initial scope and limitations
+Todas salvo `/api/health` exigen la cabecera `X-App-Token`.
 
-Phase 1 only signs in and lists courses. Moodle may change its login or course markup; central selectors should then be adjusted and the authentication/course-list flows retested. Credentials and browser state remain on the PC. This is a local integration, not an official Moodle API client.
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/api/health` | Comprobación sin autenticación |
+| GET | `/api/status` | Configuración, cuenta, sesión, última sincronización, login en curso |
+| POST | `/api/login/start` | Inicia el login en segundo plano (`username`, `password`, `remember_password`, `manual`) |
+| GET | `/api/login/status` | Estado: `working`, `mfa_number` (+`number`), `mfa_push`, `mfa_code`, `manual`, `success`, `error`, `cancelled` |
+| POST | `/api/login/code` | Envía el código de verificación de Microsoft |
+| POST | `/api/login/cancel` | Cancela el login en curso |
+| POST | `/api/logout` | Borra cookies y contraseña recordada |
+| GET | `/api/courses` | Cursos guardados en SQLite |
+| POST | `/api/courses/sync` | Descarga los cursos (409 si hay que reconectar) |
+| GET | `/api/privacy` | Inventario de datos guardados (derecho de acceso) |
+| DELETE | `/api/data` | Borra todo y destruye la clave (derecho de supresión) |
+
+## Puesta en marcha
+
+Requisitos en el PC: Python 3.11+, Node 18+.
+
+0. Lee [PRIVACIDAD.md](PRIVACIDAD.md) y pide el visto bueno a Florida (DPD / informática).
+1. **Windows:** doble clic en `Iniciar.bat`. **Linux/macOS:** `./start.sh`. La primera vez instala
+   dependencias y Chromium, crea `backend/.env` (ya apunta a `https://www.floridaoberta.com`),
+   compila la PWA y, en Windows, crea una regla de firewall solo para redes privadas.
+2. La consola muestra la dirección para la tablet (`http://IP-DEL-PC:8000`) y el **código de
+   acceso**. Ábrela en Chrome de la tablet (misma Wi-Fi), escribe el código, tu correo
+   institucional y contraseña, y aprueba en Microsoft Authenticator si lo pide.
+3. Opcional: `MOODLE_HEADLESS=false` en `backend/.env` para ver el navegador en el PC.
+
+Florida Oberta (`https://www.floridaoberta.com`) usa el botón «Conectar con Office 365»
+(`/auth/oidc/`) que redirige a `login.microsoftonline.com` (inquilino de Grupo Florida);
+comprobado contra la web real.
+
+Desarrollo con recarga en caliente:
+
+```bash
+cd backend && python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt \
+  && .venv/bin/python -m playwright install chromium
+.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+cd frontend && npm install && npm run dev   # http://IP-DEL-PC:5173
+```
+
+Pruebas: `cd backend && .venv/bin/pytest`. Usan un Moodle y un login de Microsoft simulados
+(`tests/fake_moodle.py`, en dominios distintos) que cubren: Microsoft sin MFA, con número y con
+código, código/contraseña/usuario erróneos, relogin silencioso que se detiene ante MFA,
+reutilización de la sesión cifrada, formulario propio de Moodle, alternativa por DOM, código de
+acceso y bloqueo, cabeceras de seguridad, que la contraseña nunca queda en claro en disco, y el
+borrado total.
+
+**Nota PWA en Android**: Chrome solo registra el service worker (instalación completa, modo
+offline) en orígenes seguros. Por `http://IP-local` se puede «Añadir a pantalla de inicio» pero
+sin service worker. Para la PWA completa: HTTPS local (p. ej. certificado de `mkcert` instalado en
+la tablet y `uvicorn --ssl-keyfile/--ssl-certfile`) o, solo para pruebas, la opción
+`chrome://flags/#unsafely-treat-insecure-origin-as-secure`. Se automatiza en la Fase 6.
+
+## Las 7 fases
+
+### 1. Base: login Microsoft y listado de cursos ✅
+FastAPI + SQLite, PWA React/Vite, login Playwright vía Microsoft (Office 365) con MFA aprobada
+desde la tablet, sesión y contraseña opcional cifradas, selectores centralizados, sincronización y
+listado de cursos, código de emparejamiento obligatorio, pestaña de privacidad con borrado total,
+scripts de arranque y pruebas con Moodle/Microsoft simulados.
+
+### 2. Creación de tareas
+Crear actividades «Tarea» (`mod/assign`) en un curso desde la tablet:
+- Formulario: nombre, descripción, sección/tema destino, visibilidad.
+- Fechas: disponible desde, fecha de entrega, fecha límite, recordarme calificar.
+- Archivos adicionales (enunciados) subidos desde la tablet al PC y adjuntados vía el selector de
+  archivos de Moodle.
+- Tipos de entrega (texto en línea / archivos, nº y tamaño máximo) y calificación máxima.
+- Restricciones de acceso: por fecha, grupo/agrupamiento y calificación de otra actividad.
+- Resumen previo y confirmación explícita antes de crear; guardar registro local (SQLite) y enlace
+  a la tarea creada. Selectores del formulario `modedit.php` en `selectors.py`.
+- Privacidad: los archivos subidos se guardan en el PC solo hasta adjuntarlos y luego se borran;
+  restricciones por grupo usan solo el nombre/id del grupo, sin listar alumnado.
+
+### 3. Contenidos del curso
+Ver secciones, recursos y actividades de cada curso; subir archivos/recursos, renombrar secciones,
+mostrar/ocultar elementos, con confirmación antes de cambios.
+
+### 4. Entregas y calificación
+Listar entregas por tarea (pendientes, entregadas, con retraso), descargar entregas al PC,
+calificar y añadir retroalimentación desde la tablet. **Trata datos del alumnado**: requiere
+autorización expresa de Florida, minimización (descargar solo lo necesario y borrarlo después),
+cifrado de lo que se guarde e inventario/borrado en la pestaña *Privacidad*
+(ver [PRIVACIDAD.md](PRIVACIDAD.md) §6).
+
+### 5. Planificación, plantillas y calendario
+Plantillas de tareas reutilizables, duplicar una tarea en varios cursos/grupos con desplazamiento
+de fechas, vista de calendario de entregas y recordatorios locales.
+
+### 6. Robustez y usabilidad
+Modo offline de la PWA (lectura de datos cacheados), HTTPS local asistido, recuperación de sesión
+caducada, reintentos, diagnóstico de selectores (captura de pantalla + HTML cuando algo falla),
+accesibilidad y ajustes para tablet.
+
+### 7. Seguridad, empaquetado y publicación
+Autenticación local robusta (emparejamiento de dispositivos), gestión de la clave (keyring del
+sistema), copias de seguridad, más pruebas automatizadas, arranque como servicio/instalador en el
+PC y revisión de seguridad.
+
+## Limitaciones conocidas
+
+- No es un cliente oficial de la API de Moodle: si Florida Oberta o Microsoft cambian sus páginas,
+  hay que ajustar `selectors.py`. Los selectores de Microsoft cubren la interfaz clásica y la
+  nueva, pero solo se han probado contra una simulación: la primera conexión real puede requerir
+  ajustes. Métodos MFA no previstos (llave FIDO, Windows Hello) → «login manual» en el PC.
+- El uso de la app debe estar permitido por las normas de Florida (ver PRIVACIDAD.md §1).
+- Las operaciones de navegador se ejecutan de una en una (bloqueo interno).
+- Quien tenga acceso a `backend/data/` en el PC (con tu usuario) puede descifrar la sesión y la
+  contraseña recordada: activa el cifrado de disco. Guardar la clave en el llavero del sistema
+  queda para la Fase 7.
