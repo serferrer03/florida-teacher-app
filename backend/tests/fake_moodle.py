@@ -29,6 +29,7 @@ class FakeMoodle:
         self.logins = 0
         self.ajax_enabled = True
         self.ajax_empty = False
+        self.email_glitches = 0
         self.mode = "microsoft"
         self.mfa: str | None = None
         self.mfa_approved = False
@@ -39,6 +40,7 @@ class FakeMoodle:
         self.mode, self.mfa, self.mfa_approved, self.kmsi_answer = mode, mfa, False, None
         self.ajax_enabled = True
         self.ajax_empty = False
+        self.email_glitches = 0
 
     def _build(self) -> FastAPI:
         app = FastAPI()
@@ -125,7 +127,10 @@ class FakeMoodle:
 <input type="submit" id="idSIButton9" value="Siguiente"></form></body></html>""")
 
         @app.post("/ms/login")
-        def ms_login_post(loginfmt: str = Form(...)):
+        def ms_login_post(loginfmt: str = Form("")):
+            if self.email_glitches > 0:  # como cuando la página borra el campo al cargar
+                self.email_glitches -= 1
+                return ms_login("Escriba una dirección de correo electrónico, un número de teléfono o un nombre Skype válidos.")
             if loginfmt != USER:
                 return ms_login("No encontramos ninguna cuenta con ese nombre de usuario.")
             return RedirectResponse("/ms/password", status_code=303)

@@ -34,11 +34,16 @@ def client(fake, tmp_path, monkeypatch):
     settings = replace(get_settings(), moodle_base_url=fake.url, login_timeout_s=30)
     fake.reset()
     store = SessionStore(settings.session_path, CredentialCipher(settings.key_path), settings.session_max_days)
-    return MoodleClient(settings, store)
+    c = MoodleClient(settings, store)
+    yield c
+    run(c.close())
+
+
+LOOP = asyncio.new_event_loop()  # un solo bucle: el navegador sigue abierto entre llamadas
 
 
 def run(coro):
-    return asyncio.run(coro)
+    return LOOP.run_until_complete(coro)
 
 
 def test_cipher_roundtrip_and_reset(tmp_path):
@@ -149,3 +154,16 @@ def test_empty_ajax_falls_back_to_page(client, fake):
     run(client.interactive_login(Credentials(USER, PASSWORD), RecordingUI(), fresh=True))
     courses = run(client.list_courses(Credentials(USER, None)))
     assert {c["id"] for c in courses} == {3, 7}
+
+
+def test_restart_restores_encrypted_session(client, fake):
+    run(client.interactive_login(Credentials(USER, PASSWORD), RecordingUI(), fresh=True))
+    before = fake.logins
+    run(client.forget())  # como si se reiniciara el servidor
+    assert len(run(client.list_courses(Credentials(USER, None)))) == 2
+    assert fake.logins == before
+
+
+def test_microsoft_email_glitch_is_retried(client, fake):
+    fake.email_glitches = 1
+    assert run(client.interactive_login(Credentials(USER, PASSWORD), RecordingUI(), fresh=True))["ok"]

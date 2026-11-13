@@ -89,27 +89,70 @@ class MoodleClient:
         self.base = settings.moodle_base_url
         self._lock = asyncio.Lock()  # una operación de navegador a la vez
         self._interactive = False
+        # Navegador que sigue abierto entre operaciones (como un navegador normal):
+        # la sesión de Moodle no depende de restaurar cookies. Se cierra tras IDLE_SECONDS.
+        self._pw = None
+        self._browser = None
+        self._ctx: BrowserContext | None = None
+        self._last_used = 0.0
+        self._idle_task: asyncio.Task | None = None
+
+    IDLE_SECONDS = 15 * 60
 
     def url(self, path: str) -> str:
         return self.base + path
 
     # ------------------------------------------------------------------ infra
-    @asynccontextmanager
-    async def _context(self, headless: bool | None = None, fresh: bool = False) -> AsyncIterator[BrowserContext]:
-        async with async_playwright() as pw:
-            launch_kwargs: dict = {"headless": self.settings.headless if headless is None else headless}
+    async def _context(self, headless: bool | None = None, fresh: bool = False) -> BrowserContext:
+        """Devuelve el navegador abierto o abre uno (restaurando la sesión cifrada)."""
+        if self._ctx is not None and (fresh or (headless is not None and headless != self._headless)):
+            await self._close_browser()
+        if self._ctx is None:
+            if self._pw is None:
+                self._pw = await async_playwright().start()
+            want = self.settings.headless if headless is None else headless
+            launch_kwargs: dict = {"headless": want}
             if self.settings.chromium_executable:
                 launch_kwargs["executable_path"] = self.settings.chromium_executable
-            browser = await pw.chromium.launch(**launch_kwargs)
+            self._browser = await self._pw.chromium.launch(**launch_kwargs)
+            self._ctx = await self._browser.new_context(
+                storage_state=None if fresh else self.store.load(), locale="es-ES")
+            self._ctx.set_default_timeout(self.settings.timeout_ms)
+            self._headless = want
+        self._last_used = asyncio.get_running_loop().time()
+        if self._idle_task is None or self._idle_task.done():
+            self._idle_task = asyncio.create_task(self._idle_closer())
+        return self._ctx
+
+    async def _idle_closer(self) -> None:
+        loop = asyncio.get_running_loop()
+        while self._ctx is not None:
+            await asyncio.sleep(30)
+            if loop.time() - self._last_used > self.IDLE_SECONDS and not self._lock.locked():
+                async with self._lock:
+                    await self._close_browser()
+
+    async def _close_browser(self) -> None:
+        browser, self._browser, self._ctx = self._browser, None, None
+        if browser is not None:
             try:
-                context = await browser.new_context(
-                    storage_state=None if fresh else self.store.load(),
-                    locale="es-ES",
-                )
-                context.set_default_timeout(self.settings.timeout_ms)
-                yield context
-            finally:
                 await browser.close()
+            except PlaywrightError:
+                pass
+
+    async def forget(self) -> None:
+        """Cierra el navegador abierto (al cerrar sesión o borrar datos)."""
+        async with self._lock:
+            await self._close_browser()
+
+    async def close(self) -> None:
+        """Cierra el navegador y Playwright (al apagar el servidor)."""
+        await self._close_browser()
+        if self._idle_task:
+            self._idle_task.cancel()
+        if self._pw is not None:
+            await self._pw.stop()
+            self._pw = None
 
     async def _save_state(self, context: BrowserContext) -> None:
         self.store.save(await context.storage_state())
@@ -119,6 +162,20 @@ class MoodleClient:
             return await page.locator(visible(selector)).count() > 0
         except PlaywrightError:  # la página está navegando
             return False
+
+    async def _fill(self, page: Page, selector: str, value: str) -> None:
+        """Escribe y comprueba: la página de Microsoft a veces borra el campo mientras carga."""
+        try:
+            await page.wait_for_load_state("load", timeout=10000)
+        except PlaywrightError:
+            pass
+        field = page.locator(visible(selector)).first
+        for _ in range(4):
+            await field.fill(value)
+            await page.wait_for_timeout(400)
+            if await field.input_value() == value:
+                return
+        raise MoodleLoginError("No se pudo escribir en el formulario de inicio de sesión")
 
     async def _click(self, page: Page, selector: str) -> None:
         await page.locator(visible(selector)).first.click()
@@ -182,8 +239,8 @@ class MoodleClient:
                     if counts["local"] >= 2 or not creds.password:
                         raise MoodleAuthRequired("Introduce tu contraseña")
                     counts["local"] += 1
-                    await page.locator(visible(S.LOGIN_USERNAME)).first.fill(creds.username)
-                    await page.locator(visible(S.LOGIN_PASSWORD)).first.fill(creds.password)
+                    await self._fill(page, S.LOGIN_USERNAME, creds.username)
+                    await self._fill(page, S.LOGIN_PASSWORD, creds.password)
                     await self._click(page, S.LOGIN_SUBMIT)
                 elif mode == "microsoft" and S.LOGIN_PATH in page.url:
                     await page.wait_for_timeout(1500)
@@ -198,7 +255,9 @@ class MoodleClient:
             # ---------------- páginas de Microsoft --------------------------
             if await self._visible(page, S.MS_ERROR):
                 msg = await self._text(page, S.MS_ERROR)
-                if msg:
+                retry_email = counts["email"] < 2 and await self._visible(page, S.MS_EMAIL) \
+                    and not await self._visible(page, S.MS_PASSWORD)
+                if msg and not retry_email:
                     raise MoodleLoginError(msg)
 
             if await self._visible(page, S.MS_MFA_NUMBER):
@@ -230,14 +289,14 @@ class MoodleClient:
                     raise MoodleLoginError("Microsoft no aceptó la contraseña")
                 counts["password"] += 1
                 await ui.update("working", message="Enviando contraseña…")
-                await page.locator(visible(S.MS_PASSWORD)).first.fill(creds.password)
+                await self._fill(page, S.MS_PASSWORD, creds.password)
                 await self._click(page, S.MS_SUBMIT)
             elif await self._visible(page, S.MS_EMAIL):
                 if counts["email"] >= 2:
                     raise MoodleLoginError("Microsoft no aceptó el usuario (¿correo institucional correcto?)")
                 counts["email"] += 1
                 await ui.update("working", message="Enviando usuario a Microsoft…")
-                await page.locator(visible(S.MS_EMAIL)).first.fill(creds.username)
+                await self._fill(page, S.MS_EMAIL, creds.username)
                 await self._click(page, S.MS_SUBMIT)
             await page.wait_for_timeout(700)
 
@@ -252,26 +311,31 @@ class MoodleClient:
         async with self._lock:
             if not self.store.exists() and (creds is None or not creds.password):  # nada con qué entrar
                 raise MoodleAuthRequired("Hace falta iniciar sesión")
-            async with self._context() as context:
-                page = await context.new_page()
-                try:
-                    await page.goto(self.url(S.DASHBOARD_PATH), wait_until="domcontentloaded")
-                    if not await self._is_logged_in(page):
-                        log.info("Sesión de Moodle no válida (página: %s): reintentando en segundo plano",
-                                 urlparse(page.url).path)
-                        if creds is None or not creds.username:
-                            raise MoodleAuthRequired("La sesión ha caducado: vuelve a conectar")
-                        # Sin contraseña también se intenta: Microsoft suele reconocer la sesión
-                        # guardada ("mantener sesión"); si pide contraseña o MFA, se para.
-                        await self._login(page, creds, SilentUI())
-                    await self._save_state(context)
-                    yield page
-                    await self._save_state(context)
-                except PlaywrightTimeout as exc:
-                    raise MoodleError("Florida Oberta tardó demasiado en responder") from exc
-                except PlaywrightError as exc:
-                    log.warning("Error de navegador (%s)", type(exc).__name__)  # sin URLs ni datos personales
-                    raise MoodleError("Error del navegador al hablar con Florida Oberta") from exc
+            context = await self._context()
+            page = await context.new_page()
+            try:
+                await page.goto(self.url(S.DASHBOARD_PATH), wait_until="domcontentloaded")
+                if not await self._is_logged_in(page):
+                    log.info("Sesión de Moodle no válida (página: %s): reintentando en segundo plano",
+                             urlparse(page.url).path)
+                    if creds is None or not creds.username:
+                        raise MoodleAuthRequired("La sesión ha caducado: vuelve a conectar")
+                    # Sin contraseña también se intenta: Microsoft suele reconocer la sesión
+                    # guardada ("mantener sesión"); si pide contraseña o MFA, se para.
+                    await self._login(page, creds, SilentUI())
+                await self._save_state(context)
+                yield page
+                await self._save_state(context)
+            except PlaywrightTimeout as exc:
+                await self._close_browser()
+                raise MoodleError("Florida Oberta tardó demasiado en responder") from exc
+            except PlaywrightError as exc:
+                log.warning("Error de navegador (%s)", type(exc).__name__)  # sin URLs ni datos personales
+                await self._close_browser()
+                raise MoodleError("Error del navegador al hablar con Florida Oberta") from exc
+            finally:
+                if self._ctx is not None and not page.is_closed():
+                    await page.close()
 
     async def interactive_login(
         self, creds: Credentials | None, ui: LoginUI, manual: bool = False, fresh: bool = False
@@ -284,19 +348,32 @@ class MoodleClient:
             async with self._lock:
                 if fresh:
                     self.store.clear()
-                async with self._context(headless=False if manual else None, fresh=fresh) as context:
-                    page = await context.new_page()
-                    try:
-                        await page.goto(self.url(S.DASHBOARD_PATH), wait_until="domcontentloaded")
-                        await self._login(page, creds, ui, manual=manual)
-                        await self._save_state(context)
-                        name = await self._text(page, S.USER_FULLNAME) or None
-                        return {"ok": True, "user": name}
-                    except PlaywrightTimeout as exc:
-                        raise MoodleError("Florida Oberta o Microsoft tardaron demasiado en responder") from exc
-                    except PlaywrightError as exc:
-                        log.warning("Error de navegador (%s)", type(exc).__name__)  # sin URLs ni datos personales
-                        raise MoodleError("Error del navegador durante el inicio de sesión") from exc
+                # Login automático: siempre un navegador nuevo y limpio de esta operación.
+                context = await self._context(headless=False if manual else self.settings.headless, fresh=True)
+                if not fresh:
+                    state = self.store.load()
+                    if state and state.get("cookies"):
+                        await context.add_cookies(state["cookies"])
+                page = await context.new_page()
+                try:
+                    await page.goto(self.url(S.DASHBOARD_PATH), wait_until="domcontentloaded")
+                    await self._login(page, creds, ui, manual=manual)
+                    await self._save_state(context)
+                    name = await self._text(page, S.USER_FULLNAME) or None
+                    return {"ok": True, "user": name}
+                except PlaywrightTimeout as exc:
+                    await self._close_browser()
+                    raise MoodleError("Florida Oberta o Microsoft tardaron demasiado en responder") from exc
+                except PlaywrightError as exc:
+                    log.warning("Error de navegador (%s)", type(exc).__name__)  # sin URLs ni datos personales
+                    await self._close_browser()
+                    raise MoodleError("Error del navegador durante el inicio de sesión") from exc
+                except BaseException:
+                    await self._close_browser()  # login fallido o cancelado: no dejar sesión a medias
+                    raise
+                finally:
+                    if self._ctx is not None and not page.is_closed():
+                        await page.close()
         finally:
             self._interactive = False
 

@@ -112,8 +112,10 @@ def error_message(exc: Exception) -> str:
     return "Error inesperado durante el inicio de sesión"
 
 
-def wipe_everything() -> None:
+async def wipe_everything() -> None:
     jobs.cancel()
+    if _moodle is not None:
+        await _moodle.forget()
     db.wipe()
     store.clear()
     settings.legacy_storage_state_path.unlink(missing_ok=True)
@@ -149,6 +151,8 @@ async def lifespan(_: FastAPI):
         flush=True,
     )
     yield
+    if _moodle is not None:
+        await _moodle.close()
 
 
 app = FastAPI(title="Florida Teacher App", version="0.2.0", lifespan=lifespan,
@@ -262,9 +266,11 @@ def login_cancel() -> dict:
 
 
 @app.post("/api/logout", dependencies=auth)
-def logout() -> dict:
+async def logout() -> dict:
     """Cierra la sesión: borra cookies y contraseña recordada; mantiene usuario y cursos."""
     jobs.cancel()
+    if _moodle is not None:
+        await _moodle.forget()
     store.clear()
     creds = db.get_credentials()
     if creds:
@@ -320,9 +326,9 @@ def privacy() -> dict:
 
 
 @app.delete("/api/data", dependencies=auth)
-def delete_all_data() -> dict:
+async def delete_all_data() -> dict:
     """Derecho de supresión: borra todo y destruye la clave de cifrado."""
-    wipe_everything()
+    await wipe_everything()
     return {"deleted": True}
 
 
