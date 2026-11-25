@@ -76,6 +76,8 @@ Todas salvo `/api/health` exigen la cabecera `X-App-Token`.
 
 ## Puesta en marcha
 
+**Guía rápida para el profesor: [INSTALAR.md](INSTALAR.md).**
+
 Requisitos en el PC: Python 3.11+, Node 18+.
 
 0. Lee [PRIVACIDAD.md](PRIVACIDAD.md) y pide el visto bueno a Florida (DPD / informática).
