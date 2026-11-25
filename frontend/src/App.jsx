@@ -3,6 +3,7 @@ import { api, ApiError, clearToken, getToken, setToken } from './api.js'
 import { CourseDetail } from './Assignments.jsx'
 import { CalendarView } from './Calendar.jsx'
 import { SecuritySettings } from './Settings.jsx'
+import { SetupView } from './Setup.jsx'
 
 function formatDate(iso) {
   if (!iso) return 'nunca'
@@ -160,7 +161,40 @@ function LoginProgress({ onFinished }) {
 }
 
 // ------------------------------------------------------------------ cursos
-function Courses({ status, onNeedLogin, onOpen }) {
+// Avisos de inicio: evaluaciones pendientes de revisar y primeros pasos
+function HomeNotices({ courses, onOpen, onSetup }) {
+  const [pending, setPending] = useState([])
+  const [setup, setSetup] = useState(null)
+  useEffect(() => {
+    api.autoevalPending().then((d) => setPending(d.items)).catch(() => {})
+    api.settings().then(setSetup).catch(() => {})
+  }, [])
+  const onPC = ['localhost', '127.0.0.1'].includes(window.location.hostname)
+  const [hideTablet, setHideTablet] = useState(() => { try { return localStorage.getItem('fta.hideTablet') === '1' } catch { return false } })
+  return (
+    <div className="notices">
+      {pending.map((p) => (
+        <button key={p.cmid} className={`notice-card${p.state === 'error' ? ' bad' : ''}`}
+          onClick={() => { const c = courses.find((x) => x.id === p.course_id); if (c) onOpen({ ...c, _tab: 'grading', _cmid: p.cmid, _cmidName: p.name }) }}>
+          {p.state === 'error'
+            ? <>⚠️ La evaluación automática de <strong>{p.name}</strong> ({p.course}) falló: {p.error}</>
+            : <>🤖 <strong>{p.name}</strong> ({p.course}): {p.pending} nota(s) propuesta(s) por la IA para revisar →</>}
+        </button>
+      ))}
+      {setup && !setup.ai_active && (
+        <button className="notice-card" onClick={onSetup}>✨ Activa la IA (Claude o Gemini) para crear tareas describiéndolas y evaluarlas automáticamente →</button>
+      )}
+      {onPC && !hideTablet && (
+        <div className="row">
+          <button className="notice-card subtle grow" onClick={onSetup}>📱 ¿Aún no has conectado la tablet? Escanea un QR desde Ajustes →</button>
+          <button className="link" onClick={() => { try { localStorage.setItem('fta.hideTablet', '1') } catch { /* sin almacenamiento */ } setHideTablet(true) }}>Ya está</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Courses({ status, onNeedLogin, onOpen, onSetup }) {
   const [courses, setCourses] = useState([])
   const [syncedAt, setSyncedAt] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -204,6 +238,7 @@ function Courses({ status, onNeedLogin, onOpen }) {
         <button onClick={sync} disabled={busy}>{busy ? 'Sincronizando…' : 'Actualizar'}</button>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
+      <HomeNotices courses={courses} onOpen={onOpen} onSetup={onSetup} />
       {courses.length > 5 && (
         <input className="search" placeholder="Buscar curso…" value={filter}
           onChange={(e) => setFilter(e.target.value)} />
@@ -335,6 +370,7 @@ export default function App() {
       <p>Define <code>MOODLE_BASE_URL</code> en <code>backend/.env</code> y reinicia el servidor.</p></div>
   )
   else if (view === 'privacy') body = <Privacy onChanged={load} />
+  else if (view === 'setup') body = <SetupView />
   else if (view === 'calendar' && status.has_session && !loggingIn && !connect.open) body = <CalendarView onNeedLogin={onNeedLogin} />
   else if (loggingIn) body = <LoginProgress onFinished={onLoginFinished} />
   else if (!status.has_session || connect.open) body = (
@@ -343,7 +379,7 @@ export default function App() {
       onCancel={status.has_session ? () => setConnect({ open: false, reason: '' }) : null} />
   )
   else if (course) body = <CourseDetail course={course} onBack={() => setCourse(null)} onNeedLogin={onNeedLogin} />
-  else body = <Courses status={status} onNeedLogin={onNeedLogin} onOpen={setCourse} />
+  else body = <Courses status={status} onNeedLogin={onNeedLogin} onOpen={setCourse} onSetup={() => setView('setup')} />
 
   return (
     <div className="app">
@@ -353,6 +389,7 @@ export default function App() {
           <nav className="tabs">
             <button className={view === 'courses' ? 'tab active' : 'tab'} onClick={() => { setView('courses'); setCourse(null) }}>Cursos</button>
             <button className={view === 'calendar' ? 'tab active' : 'tab'} onClick={() => setView('calendar')}>Calendario</button>
+            <button className={view === 'setup' ? 'tab active' : 'tab'} onClick={() => setView('setup')}>Ajustes</button>
             <button className={view === 'privacy' ? 'tab active' : 'tab'} onClick={() => setView('privacy')}>Privacidad</button>
             {status.has_session && view === 'courses' && !loggingIn && (
               <button className="tab" onClick={() => setConnect({ open: true, reason: '' })}>Cuenta</button>

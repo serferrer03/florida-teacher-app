@@ -123,8 +123,9 @@ Es un tratamiento **nuevo y distinto** de los anteriores: los datos del alumnado
 terceros (Anthropic, proveedor de la IA Claude, y Google). **Necesitas la autorización expresa y
 específica del DPD de Florida** para esto; la autorización para usar la app en tu PC no lo cubre.
 Pregunta en concreto si puedes:
-- enviar el contenido de las entregas a la API de Anthropic (encargado del tratamiento, posible
-  transferencia internacional a EE. UU.: requiere contrato de encargo y garantías adecuadas);
+- enviar el contenido de las entregas a la API de IA que elijas: Anthropic (Claude) o Google (Gemini)
+  (encargados del tratamiento, posible transferencia internacional a EE. UU.: requiere contrato de
+  encargo y garantías adecuadas);
 - guardar nombres, notas y observaciones en tu Google Drive (Florida usa Microsoft 365; quizá
   prefieran una hoja de Excel en OneDrive institucional: dímelo y la adapto).
 
@@ -140,3 +141,12 @@ Medidas que aplica la app:
   cuenta de Google.
 - Informa al alumnado (p. ej. en la guía docente o el enunciado) de que las tareas pueden
   pre-evaluarse con IA y de que el profesor revisa todas las notas.
+
+### Otras automatizaciones con IA (sin datos del alumnado)
+
+- **Crear tarea con IA** y **generar rúbrica**: se envía a la IA tu descripción de la tarea y el
+  nombre del curso. No incluye datos de alumnos.
+- **✨ Mejorar redacción** de un comentario: se envía el texto del comentario y la nota, **sin el
+  nombre del alumno**. No escribas datos identificativos en el comentario si vas a usarlo.
+- Las claves de la API (Claude/Gemini) y el secreto de la hoja se guardan **cifrados** en el PC
+  (pestaña Ajustes) y la app nunca los muestra completos.

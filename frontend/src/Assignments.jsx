@@ -119,6 +119,45 @@ function AssignmentForm({ course, options, onCreated, onCancel, onNeedLogin }) {
   const [allCourses, setAllCourses] = useState([])
   const [extra, setExtra] = useState([])   // otros cursos donde crear la misma tarea
   const [progress, setProgress] = useState('')
+  const [aiInfo, setAiInfo] = useState(null)        // ajustes de IA (¿configurada?, ¿autorización?)
+  const [aiPrompt, setAiPrompt] = useState('')
+  const [aiBusy, setAiBusy] = useState('')
+  const [auto, setAuto] = useState({ enabled: false, criteria: '', ack: false })
+  useEffect(() => {
+    api.settings().then((s) => {
+      setAiInfo(s)
+      setAuto((a) => ({ ...a, enabled: !!s.ai_active && s.autoeval_ack, ack: s.autoeval_ack }))
+    }).catch(() => {})
+  }, [])
+
+  async function draftWithAI() {
+    if (aiPrompt.trim().length < 5) return
+    setAiBusy('draft'); setError('')
+    try {
+      const d = await api.aiDraft(course.id, aiPrompt)
+      const [h, m] = (d.due_time || '23:55').split(':').map(Number)
+      setF((o) => ({
+        ...o, name: d.name, description: d.description, grade_max: d.grade_max,
+        online_text: d.online_text, file_submissions: d.file_submissions, max_files: String(d.max_files),
+        due: daysFromNow(d.due_in_days, h, m), grading_due: daysFromNow(d.due_in_days + 7, 9, 0),
+        use: { ...o.use, due: true, grading_due: true },
+      }))
+      setAuto((a) => ({ ...a, criteria: d.criteria }))
+    } catch (err) { setError(err.message) } finally { setAiBusy('') }
+  }
+  async function rubricWithAI() {
+    setAiBusy('rubric'); setError('')
+    try { const r = await api.aiRubric(f.name || 'Tarea', f.description, f.grade_max); setAuto((a) => ({ ...a, criteria: r.criteria })) }
+    catch (err) { setError(err.message) } finally { setAiBusy('') }
+  }
+  // Programa la evaluación automática al cierre (fecha límite o, si no hay, fecha de entrega)
+  async function scheduleAuto(courseId, cmid) {
+    const close = payload.cutoff || payload.due
+    if (!auto.enabled || !close || auto.criteria.trim().length < 10) return null
+    if (!auto.ack) { await api.autoevalAck(); setAuto((a) => ({ ...a, ack: true })) }
+    await api.saveAutoeval(courseId, cmid, { name: payload.name, criteria: auto.criteria, grade_max: Number(payload.grade_max) || 10, close_at: close, enabled: true })
+    return close
+  }
   useEffect(() => {
     api.templates().then((d) => setTemplates(d.templates)).catch(() => {})
     api.courses().then((d) => setAllCourses(d.courses.filter((c) => c.id !== course.id))).catch(() => {})
@@ -161,6 +200,7 @@ function AssignmentForm({ course, options, onCreated, onCancel, onNeedLogin }) {
     try {
       setProgress(course.fullname)
       main = await api.createAssignment(course.id, payload, files)
+      try { main.autoeval_at = await scheduleAuto(course.id, main.cmid) } catch (err) { main.autoeval_error = err.message }
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) { onNeedLogin(err.message); return }
       setError(err.message); setStep('review'); return
@@ -172,7 +212,9 @@ function AssignmentForm({ course, options, onCreated, onCancel, onNeedLogin }) {
       setProgress(c.fullname)
       try {
         const res = await api.createAssignment(c.id, generic, files)
-        others.push({ course: c.fullname, url: res.url })
+        let autoNote = ''
+        try { if (await scheduleAuto(c.id, res.cmid)) autoNote = ' · evaluación automática programada' } catch { autoNote = ' · sin evaluación automática' }
+        others.push({ course: c.fullname, url: res.url, note: autoNote })
       } catch (err) {
         others.push({ course: c.fullname, error: err.message })
       }
@@ -198,6 +240,7 @@ function AssignmentForm({ course, options, onCreated, onCancel, onNeedLogin }) {
             payload.file_submissions && `Archivos (máx. ${payload.max_files}, ${sizeLabel || 'límite del curso'})`].filter(Boolean).join(' · ')}</dd>
           <dt>Calificación</dt><dd>{payload.grade_max > 0 ? `Sobre ${payload.grade_max}` : 'Sin calificación'}</dd>
           <dt>Archivos adjuntos</dt><dd>{files.length ? files.map((x) => x.name).join(', ') : 'Ninguno'}</dd>
+          {auto.enabled && aiInfo?.ai_active && <><dt>Evaluación automática</dt><dd>Sí, al cierre ({show(payload.cutoff || payload.due)}), con {aiInfo.ai_active === 'gemini' ? 'Gemini' : 'Claude'}</dd></>}
           {extra.length > 0 && <><dt>También en</dt><dd>{allCourses.filter((c) => extra.includes(c.id)).map((c) => c.fullname).join(', ')}
             {(r.group_ids.length > 0 || r.grouping_id || r.grade) && <div className="muted small">(en esos cursos sin las restricciones de grupo/nota)</div>}</dd></>}
           <dt>Restricciones</dt>
@@ -223,6 +266,17 @@ function AssignmentForm({ course, options, onCreated, onCancel, onNeedLogin }) {
   return (
     <form className="card wide" onSubmit={review}>
       <h2>Nueva tarea · {course.fullname}</h2>
+      {aiInfo?.ai_active ? (
+        <div className="ai-box">
+          <label>✨ Crear con IA: describe la tarea con tus palabras
+            <textarea rows={3} value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)}
+              placeholder="Ej.: Práctica de bucles en Java con 5 ejercicios, entrega en PDF y código fuente, para el viernes a las 23:59, sobre 10." />
+          </label>
+          <button type="button" onClick={draftWithAI} disabled={!!aiBusy || aiPrompt.trim().length < 5}>
+            {aiBusy === 'draft' ? 'Redactando…' : '✨ Rellenar el formulario'}</button>
+          <p className="muted small">La IA rellena nombre, enunciado, fechas, tipo de entrega y rúbrica. Revísalo todo antes de crear.</p>
+        </div>
+      ) : aiInfo && <p className="muted small">💡 Añade una clave de Claude o Gemini en <strong>Ajustes</strong> para crear tareas describiéndolas y evaluarlas automáticamente.</p>}
       <div className="row template-bar">
         <select defaultValue="" onChange={(e) => { applyTemplate(e.target.value); e.target.value = '' }} aria-label="Cargar plantilla">
           <option value="" disabled>{templates.length ? 'Cargar plantilla…' : 'Sin plantillas guardadas'}</option>
@@ -356,6 +410,25 @@ function AssignmentForm({ course, options, onCreated, onCancel, onNeedLogin }) {
         </fieldset>
       )}
 
+      {aiInfo?.ai_active && (
+        <fieldset>
+          <legend>🤖 Evaluación automática con IA</legend>
+          <label className="check"><input type="checkbox" checked={auto.enabled} onChange={(e) => setAuto({ ...auto, enabled: e.target.checked })} />
+            <span>Al cerrarse la tarea, que la IA proponga nota y observación para cada entrega (tú las revisas antes de publicar)</span></label>
+          {auto.enabled && (
+            <>
+              <label>Criterios / rúbrica
+                <textarea rows={4} value={auto.criteria} onChange={(e) => setAuto({ ...auto, criteria: e.target.value })}
+                  placeholder="Ej.: Funciona (5 p). Código claro (3 p). Explicación (2 p)." />
+              </label>
+              <button type="button" className="secondary" onClick={rubricWithAI} disabled={!!aiBusy}>{aiBusy === 'rubric' ? 'Generando…' : '✨ Generar rúbrica con IA'}</button>
+              {!auto.ack && <p className="muted small">Al crear la tarea confirmas que Florida te autoriza a usar la evaluación con IA (ver Privacidad).</p>}
+              {!(payload.cutoff || payload.due) && <p className="error small">Activa una fecha de entrega o límite: es el momento en que se evaluará.</p>}
+            </>
+          )}
+        </fieldset>
+      )}
+
       {allCourses.length > 0 && (
         <fieldset>
           <legend>Crear también en otros cursos</legend>
@@ -384,7 +457,7 @@ export function CourseDetail({ course, onBack, onNeedLogin }) {
   const [options, setOptions] = useState(null)
   const [list, setList] = useState([])
   const [mode, setMode] = useState('list')  // list | form | done
-  const [tab, setTab] = useState('contents')  // contents | assignments
+  const [tab, setTab] = useState(course._tab || 'contents')  // contents | grading | students | assignments
   const [created, setCreated] = useState(null)
   const [error, setError] = useState('')
 
@@ -428,12 +501,14 @@ export function CourseDetail({ course, onBack, onNeedLogin }) {
         <div className="card wide">
           <h2>✅ Tarea creada</h2>
           <p>«{created.name}» ya está en Florida Oberta.</p>
+          {created.autoeval_at && <p>🤖 Evaluación automática programada para el {show(created.autoeval_at)}. Cuando termine verás un aviso en «Mis cursos» para revisar las notas.</p>}
+          {created.autoeval_error && <p className="error">No se pudo programar la evaluación automática: {created.autoeval_error}</p>}
           {created.others?.length > 0 && (
             <ul className="files">
               {created.others.map((o) => (
                 <li key={o.course}>{o.error
                   ? <span className="error">{o.course}: {o.error}</span>
-                  : <a href={o.url} target="_blank" rel="noreferrer noopener">{o.course} ↗</a>}</li>
+                  : <><a href={o.url} target="_blank" rel="noreferrer noopener">{o.course} ↗</a>{o.note}</>}</li>
               ))}
             </ul>
           )}
@@ -455,7 +530,7 @@ export function CourseDetail({ course, onBack, onNeedLogin }) {
         </nav>
       )}
       {mode === 'list' && tab === 'contents' && <ContentsView course={course} onNeedLogin={onNeedLogin} />}
-      {mode === 'list' && tab === 'grading' && <GradingView course={course} onNeedLogin={onNeedLogin} />}
+      {mode === 'list' && tab === 'grading' && <GradingView course={course} initialCmid={course._cmid} onNeedLogin={onNeedLogin} />}
       {mode === 'list' && tab === 'students' && <StudentsView course={course} onNeedLogin={onNeedLogin} />}
 
       {mode === 'list' && tab === 'assignments' && (

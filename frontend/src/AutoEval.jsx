@@ -15,10 +15,10 @@ function Ack({ onDone }) {
     <div className="notice-box">
       <p><strong>Antes de activar la evaluación con IA</strong></p>
       <ul className="small">
-        <li>El contenido de las entregas (sin el nombre del alumno) se envía a la API de Claude (Anthropic) para proponer nota y observación.</li>
+        <li>El contenido de las entregas (sin el nombre del alumno) se envía a la IA que hayas configurado (Claude de Anthropic o Gemini de Google) para proponer nota y observación.</li>
         <li>Nombres, notas y observaciones se escriben en tu hoja de Google.</li>
         <li>Ninguna nota se publica en Florida Oberta sin que tú la revises (art. 22 RGPD; la Ley de IA de la UE considera de alto riesgo la evaluación con IA).</li>
-        <li>Esto es un tratamiento nuevo: necesitas la autorización expresa del DPD de Florida para enviar datos a Anthropic y a Google (ver PRIVACIDAD.md §7).</li>
+        <li>Esto es un tratamiento nuevo: necesitas la autorización expresa del DPD de Florida para enviar datos al proveedor de IA y a Google (ver PRIVACIDAD.md §7).</li>
       </ul>
       <label className="check"><input type="checkbox" checked={ok} onChange={(e) => setOk(e.target.checked)} />
         <span>Confirmo que Florida me ha autorizado a usar la evaluación con IA en estas condiciones.</span></label>
@@ -27,7 +27,7 @@ function Ack({ onDone }) {
   )
 }
 
-export function AutoEvalPanel({ course, assign, fail }) {
+export function AutoEvalPanel({ course, assign, fail, autoOpen = false }) {
   const [status, setStatus] = useState(null)
   const [data, setData] = useState(null)
   const [form, setForm] = useState(null)
@@ -35,7 +35,8 @@ export function AutoEvalPanel({ course, assign, fail }) {
   const [selected, setSelected] = useState([])
   const [notify, setNotify] = useState(true)
   const [msg, setMsg] = useState('')
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(autoOpen)
+  const [aiBusy, setAiBusy] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -88,13 +89,19 @@ export function AutoEvalPanel({ course, assign, fail }) {
       {status && !status.acknowledged && <Ack onDone={load} />}
       {status?.acknowledged && form && (
         <div className="grid">
-          {!status.ai_configured && <p className="error">Falta la clave de la API de Claude: añade ANTHROPIC_API_KEY en backend/.env y reinicia.</p>}
-          {!status.sheets_configured && <p className="muted small">Hoja de Google sin configurar (GOOGLE_SHEETS_WEBHOOK_URL y GOOGLE_SHEETS_SECRET en backend/.env): se evaluará igualmente, sin actualizarla.</p>}
+          {!status.ai_configured && <p className="error">Falta una clave de IA: añádela en la pestaña Ajustes (Claude o Gemini).</p>}
+          {!status.sheets_configured && <p className="muted small">Hoja de Google sin conectar (pestaña Ajustes): se evaluará igualmente, sin actualizarla.</p>}
           <form className="grid" onSubmit={save}>
             <label>Criterios de evaluación / rúbrica
               <textarea rows={5} required minLength={10} value={form.criteria} onChange={(e) => setForm({ ...form, criteria: e.target.value })}
                 placeholder={'Ej.: Funciona correctamente (4 p). Código limpio y comentado (3 p). Explicación de la solución (3 p). Penaliza el plagio.'} />
             </label>
+            {status.ai_configured && (
+              <button type="button" className="secondary" disabled={aiBusy} onClick={async () => {
+                setAiBusy(true)
+                try { setForm({ ...form, criteria: (await api.aiRubric(assign.name, '', form.grade_max)).criteria }) } catch (err) { fail(err) } finally { setAiBusy(false) }
+              }}>{aiBusy ? 'Generando…' : '✨ Generar rúbrica con IA'}</button>
+            )}
             <div className="grid2">
               <label>Nota máxima<input type="number" min="1" step="0.5" value={form.grade_max} onChange={(e) => setForm({ ...form, grade_max: e.target.value })} required /></label>
               <label>Evaluar al cerrarse la tarea el<input type="datetime-local" value={form.close_at} onChange={(e) => setForm({ ...form, close_at: e.target.value })} required /></label>
@@ -132,6 +139,12 @@ export function AutoEvalPanel({ course, assign, fail }) {
                           onChange={(ev) => setEdits({ ...edits, [r.userid]: { ...e, grade: ev.target.value } })} /></label>
                         <label className="grow">Observación<textarea rows={3} value={e.observation} disabled={r.status === 'published'}
                           onChange={(ev) => setEdits({ ...edits, [r.userid]: { ...e, observation: ev.target.value } })} /></label>
+                        {r.status !== 'published' && status.ai_configured && (
+                          <button className="secondary" title="Mejorar la redacción con IA" disabled={aiBusy || !e.observation} onClick={async () => {
+                            setAiBusy(true)
+                            try { const t = (await api.aiFeedback(e.observation, String(e.grade))).text; setEdits({ ...edits, [r.userid]: { ...e, observation: t } }) } catch (err) { fail(err) } finally { setAiBusy(false) }
+                          }}>✨</button>
+                        )}
                         {changed && <button className="secondary" onClick={() => saveEdit(r)}>Guardar cambio</button>}
                       </div>
                     </li>

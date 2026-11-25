@@ -1,4 +1,4 @@
-"""Evaluación de una entrega con Claude (API de Anthropic).
+"""Evaluación de una entrega con IA (Claude o Gemini, ver app/ai.py).
 
 PRIVACIDAD: a la IA solo se envían los criterios del profesor, el enunciado
 (nombre de la tarea) y el contenido de la entrega. NUNCA el nombre del alumno;
@@ -7,17 +7,15 @@ el profesor revisa antes de publicarla (art. 22 RGPD).
 """
 from __future__ import annotations
 
-import base64
 import io
-import json
 import logging
-import os
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+from . import ai
+
 log = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-opus-5-5"
 TEXT_EXT = {".txt", ".md", ".py", ".java", ".js", ".ts", ".jsx", ".tsx", ".html", ".css", ".csv", ".json",
             ".xml", ".sql", ".c", ".h", ".cpp", ".hpp", ".cs", ".php", ".rb", ".go", ".kt", ".swift", ".sh",
             ".yml", ".yaml", ".ini", ".properties", ".r", ".m", ".tex"}
@@ -66,7 +64,7 @@ class Evaluation:
 
 
 def configured() -> bool:
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    return ai.configured()
 
 
 def _docx_text(data: bytes) -> str | None:
@@ -82,20 +80,17 @@ def _docx_text(data: bytes) -> str | None:
 
 
 def build_content(task: str, criteria: str, grade_max: float, sub: Submission) -> tuple[list[dict], list[str]]:
-    """Bloques de contenido para la API y lista de archivos que no se pudieron enviar."""
-    blocks: list[dict] = []
+    """Partes neutras para la IA y lista de archivos que no se pudieron enviar."""
+    parts: list[dict] = []
     skipped: list[str] = []
     for i, (name, data) in enumerate(sub.files, 1):
         ext = PurePosixPath(name.lower()).suffix
         alias = f"archivo_{i}{ext}"  # sin el nombre original (puede contener el del alumno)
         if ext == ".pdf":
-            blocks.append({"type": "document", "title": alias, "source": {
-                "type": "base64", "media_type": "application/pdf",
-                "data": base64.standard_b64encode(data).decode()}})
+            parts.append({"kind": "pdf", "title": alias, "data": data})
         elif ext in IMAGE_TYPES:
-            blocks.append({"type": "image", "source": {
-                "type": "base64", "media_type": IMAGE_TYPES[ext], "data": base64.standard_b64encode(data).decode()}})
-            blocks.append({"type": "text", "text": f"(La imagen anterior es {alias})"})
+            parts.append({"kind": "image", "mime": IMAGE_TYPES[ext], "data": data})
+            parts.append({"kind": "text", "text": f"(La imagen anterior es {alias})"})
         elif ext in TEXT_EXT or ext == ".docx":
             text = _docx_text(data) if ext == ".docx" else data.decode("utf-8", errors="replace")
             if text is None:
@@ -104,44 +99,31 @@ def build_content(task: str, criteria: str, grade_max: float, sub: Submission) -
             if len(text) > MAX_TEXT_CHARS:
                 skipped.append(f"{alias} (demasiado largo)")
                 continue
-            blocks.append({"type": "text", "text": f"--- {alias} ---\n{text}"})
+            parts.append({"kind": "text", "text": f"--- {alias} ---\n{text}"})
         else:
             skipped.append(alias)
     if sub.onlinetext.strip():
-        blocks.append({"type": "text", "text": f"--- Texto en línea de la entrega ---\n{sub.onlinetext}"})
+        parts.append({"kind": "text", "text": f"--- Texto en línea de la entrega ---\n{sub.onlinetext}"})
     note = f"\nArchivos que no se han podido incluir: {', '.join(skipped)}." if skipped else ""
-    blocks.append({"type": "text", "text": (
+    parts.append({"kind": "text", "text": (
         f"Tarea: {task}\nNota máxima: {grade_max:g}\nCriterios del profesor:\n{criteria}\n{note}\n"
         "Evalúa la entrega anterior y responde con el JSON pedido.")})
-    return blocks, skipped
+    return parts, skipped
 
 
 async def evaluate(task: str, criteria: str, grade_max: float, sub: Submission) -> Evaluation:
-    import anthropic
-
-    blocks, skipped = build_content(task, criteria, grade_max, sub)
-    if len(blocks) == 1:  # solo las instrucciones: no hay nada que evaluar
+    parts, skipped = build_content(task, criteria, grade_max, sub)
+    if len(parts) == 1:  # solo las instrucciones: no hay nada que evaluar
         return Evaluation(None, "", True, "Entrega sin contenido evaluable" +
                           (f" (formatos no admitidos: {', '.join(skipped)})" if skipped else ""))
-    client = anthropic.AsyncAnthropic()
     try:
-        response = await client.beta.messages.create(
-            model=os.environ.get("AUTO_EVAL_MODEL") or DEFAULT_MODEL,
-            max_tokens=16000,
-            system=SYSTEM,
-            messages=[{"role": "user", "content": blocks}],
-            output_config={"effort": "high", "format": {"type": "json_schema", "schema": SCHEMA}},
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
-        )
-    except anthropic.BadRequestError as exc:
-        return Evaluation(None, "", True, f"La IA no pudo procesar la entrega: {exc.message[:200]}")
-    if response.stop_reason == "refusal":
+        data = await ai.generate_json(SYSTEM, parts, SCHEMA)
+    except ai.AIRefused:
         return Evaluation(None, "", True, "La IA declinó evaluar esta entrega")
-    if response.stop_reason == "max_tokens":
-        return Evaluation(None, "", True, "La respuesta de la IA quedó incompleta")
-    text = next((b.text for b in response.content if b.type == "text"), "")
-    data = json.loads(text)
+    except ai.AIError as exc:
+        if "clave" in str(exc) or "configurada" in str(exc):
+            raise  # problema de configuración: que falle la evaluación entera
+        return Evaluation(None, "", True, str(exc))
     grade = max(0.0, min(float(data["grade"]), grade_max))
     review = bool(data["needs_review"]) or bool(skipped)
     reason = data.get("review_reason") or ""

@@ -261,3 +261,17 @@ PC y revisión de seguridad.
   actualiza la hoja de Google vía Apps Script (`integraciones/google-sheets.gs`). El profesor revisa,
   edita y publica en Florida Oberta (nota + comentario). Requisitos y límites legales:
   PRIVACIDAD.md §7.
+
+## v1.2: instalación guiada y automatización con IA (Claude o Gemini)
+
+- **Ajustes** (nueva pestaña): QR para conectar la tablet (certificado + app ya vinculada con el
+  código), claves de **Claude o Gemini** guardadas cifradas con botón «Probar», y conexión de la
+  hoja de Google guiada (copiar el script, generar secreto, probar). Sin editar `.env`.
+- **Capa de IA común** (`backend/app/ai.py`): Claude (`claude-opus-5-5`, salida JSON estructurada,
+  fallbacks del servidor) o Gemini (`gemini-3.8-flash`, SDK `google-genai`, `response_json_schema`).
+- **✨ Crear con IA**: describes la tarea en una frase y la IA rellena nombre, enunciado, fechas,
+  tipo de entrega y rúbrica; al crearla puede quedar **programada la evaluación automática** al
+  cierre (fecha límite o de entrega), también en los otros cursos marcados.
+- **✨ Generar rúbrica** y **✨ Mejorar redacción** de comentarios (calificación manual y propuestas).
+- **Avisos en «Mis cursos»**: evaluaciones terminadas pendientes de revisar (abren directamente la
+  revisión) y errores; recordatorios de primeros pasos.

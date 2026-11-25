@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
-from . import ai_eval, sheets
+from . import ai, ai_eval, ai_features, settings_store, sheets
 from .assignments import LOCAL_DT, AssignmentIn, to_form_values
 from .autoeval import STATUS_LABEL, AutoEvaluator
 from .config import BACKEND_DIR, get_settings
@@ -50,6 +50,7 @@ log = logging.getLogger("app")
 settings = get_settings()
 db = Database(settings.db_path)
 cipher = CredentialCipher(settings.key_path, use_keyring=os.environ.get("KEY_STORAGE", "auto") != "file")
+app_settings = settings_store.init(db, cipher)
 store = SessionStore(settings.session_path, cipher, settings.session_max_days)
 jobs = LoginJobs()
 autoeval: AutoEvaluator  # se crea tras definir get_moodle/stored_credentials
@@ -568,8 +569,8 @@ class PublishIn(BaseModel):
 
 @app.get("/api/autoeval/status", dependencies=auth)
 def autoeval_status() -> dict:
-    return {"ai_configured": ai_eval.configured(), "sheets_configured": sheets.configured(),
-            "model": os.environ.get("AUTO_EVAL_MODEL") or ai_eval.DEFAULT_MODEL,
+    return {"ai_configured": ai.configured(), "sheets_configured": sheets.configured(),
+            "provider": ai.provider(), "model": ai.model_name() if ai.configured() else None,
             "acknowledged": db.get_meta("autoeval_ack") is not None}
 
 
@@ -612,7 +613,7 @@ async def run_autoeval(course_id: int, cmid: int) -> dict:
     if not db.get_autoeval(cmid):
         raise HTTPException(404, "Activa primero la evaluación automática en esta tarea")
     if not ai_eval.configured():
-        raise HTTPException(409, "Falta ANTHROPIC_API_KEY en backend/.env")
+        raise HTTPException(409, "Configura una clave de IA en Ajustes → Inteligencia artificial")
     asyncio.create_task(autoeval.run(cmid))
     return {"started": True}
 
@@ -659,6 +660,129 @@ async def publish_autoeval(course_id: int, cmid: int, body: PublishIn) -> dict:
         db.set_autoeval_state(cmid, "done")
     log.info("Evaluación automática: %d notas publicadas", published)
     return {"published": published, "errors": errors, "sheet_error": sheet_error}
+
+
+# ------------------------------------------------------- Ajustes (asistente)
+class SettingsIn(BaseModel):
+    ai_provider: Literal["auto", "claude", "gemini"] | None = None
+    anthropic_api_key: str | None = Field(default=None, max_length=300)
+    gemini_api_key: str | None = Field(default=None, max_length=300)
+    ai_model: str | None = Field(default=None, max_length=80, pattern=r"^[a-z0-9.\-]*$")
+    sheets_url: str | None = Field(default=None, max_length=500)
+    sheets_secret: str | None = Field(default=None, max_length=300)
+
+
+@app.get("/api/settings", dependencies=auth)
+def get_settings_view() -> dict:
+    return {**app_settings.public(), "ai_active": ai.provider(),
+            "ai_model_active": ai.model_name() if ai.configured() else None,
+            "sheets_configured": sheets.configured(),
+            "autoeval_ack": db.get_meta("autoeval_ack") is not None}
+
+
+@app.put("/api/settings", dependencies=auth)
+def put_settings(body: SettingsIn) -> dict:
+    if body.sheets_url and not body.sheets_url.startswith("https://script.google.com/"):
+        raise HTTPException(422, "La URL de la hoja debe ser la de la aplicación web de Apps Script (https://script.google.com/…/exec)")
+    for name, value in body.model_dump().items():
+        app_settings.set(name, value)
+    log.info("Ajustes actualizados")
+    return get_settings_view()
+
+
+@app.post("/api/settings/test-ai", dependencies=auth)
+async def test_ai() -> dict:
+    try:
+        return {"ok": True, "message": await ai.test()}
+    except ai.AIError as exc:
+        return {"ok": False, "message": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "message": f"{type(exc).__name__}: {str(exc)[:200]}"}
+
+
+@app.post("/api/settings/test-sheets", dependencies=auth)
+async def test_sheets() -> dict:
+    if not sheets.configured():
+        return {"ok": False, "message": "Falta la URL o el secreto de la hoja"}
+    err = await sheets.push([], allow_empty=True)
+    return {"ok": err is None, "message": err or "Conexión con la hoja de Google correcta"}
+
+
+@app.get("/api/sheets-script", dependencies=auth)
+def sheets_script() -> dict:
+    """Código del Apps Script para copiarlo desde la app."""
+    path = BACKEND_DIR.parent / "integraciones" / "google-sheets.gs"
+    return {"code": path.read_text(encoding="utf-8") if path.exists() else ""}
+
+
+@app.get("/api/autoeval/pending", dependencies=auth)
+def autoeval_pending() -> dict:
+    """Evaluaciones automáticas terminadas que esperan revisión (para el aviso de inicio)."""
+    courses = {c["id"]: c for c in db.list_courses()}
+    out = []
+    for a in db.list_autoeval():
+        if a["state"] in {"review", "error"} and a["course_id"] in courses:
+            pending = sum(r["status"] != "published" for r in db.list_results(a["cmid"]))
+            out.append({"course_id": a["course_id"], "course": courses[a["course_id"]]["fullname"],
+                        "cmid": a["cmid"], "name": a["name"], "state": a["state"],
+                        "pending": pending, "error": a["last_error"] if a["state"] == "error" else None})
+    return {"items": out}
+
+
+@app.get("/api/pairing", dependencies=auth)
+def pairing() -> dict:
+    """Datos para el QR de «Conectar tablet» (se muestra en la pantalla del PC)."""
+    from .tls import lan_ip
+    ip = lan_ip()
+    http_port = os.environ.get("PORT") or "8000"
+    https_port = int(os.environ.get("HTTPS_PORT") or 8443)
+    https_ok = (settings.data_dir / "tls" / "ca.crt").exists() and https_port > 0
+    return {"code": ACCESS["token"], "ip": ip,
+            "http_url": f"http://{ip}:{http_port}/", "https_url": f"https://{ip}:{https_port}/" if https_ok else None,
+            "ca_url": f"http://{ip}:{http_port}/ca.crt" if https_ok else None}
+
+
+# --------------------------------------------------- Automatizaciones con IA
+class DraftIn(BaseModel):
+    course_id: int
+    prompt: str = Field(min_length=5, max_length=5000)
+
+
+class RubricIn(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str = Field(default="", max_length=20000)
+    grade_max: float = Field(default=10, gt=0, le=10000)
+
+
+class FeedbackIn(BaseModel):
+    text: str = Field(min_length=3, max_length=20000)
+    grade: str | None = Field(default=None, max_length=50)
+
+
+async def ai_call(coro):
+    try:
+        return await coro
+    except ai.AIRefused as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except ai.AIError as exc:
+        raise HTTPException(409 if "configurada" in str(exc) else 502, str(exc)) from exc
+
+
+@app.post("/api/ai/draft-assignment", dependencies=auth)
+async def ai_draft(body: DraftIn) -> dict:
+    course = next((c["fullname"] for c in db.list_courses() if c["id"] == body.course_id), "")
+    today = datetime.now().strftime("%A %d/%m/%Y")
+    return await ai_call(ai_features.draft_assignment(body.prompt, course, today))
+
+
+@app.post("/api/ai/rubric", dependencies=auth)
+async def ai_rubric(body: RubricIn) -> dict:
+    return {"criteria": await ai_call(ai_features.rubric(body.name, body.description, body.grade_max))}
+
+
+@app.post("/api/ai/improve-feedback", dependencies=auth)
+async def ai_feedback(body: FeedbackIn) -> dict:
+    return {"text": await ai_call(ai_features.improve_feedback(body.text, body.grade))}
 
 
 # ------------------------------------------- Fase 6: HTTPS y diagnóstico

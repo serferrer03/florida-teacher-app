@@ -35,13 +35,15 @@ function GradeBox({ course, cmid, s, onSaved, fail }) {
     <form className="gradebox" onSubmit={save}>
       <label>Nota<input inputMode="decimal" value={grade} onChange={(e) => setGrade(e.target.value)} placeholder="p. ej. 7,5" /></label>
       <label className="grow">Comentario<textarea rows={2} value={feedback} onChange={(e) => setFeedback(e.target.value)} /></label>
+      <button type="button" className="secondary" disabled={busy || feedback.trim().length < 3} title="Mejorar la redacción con IA"
+        onClick={async () => { setBusy(true); try { setFeedback((await api.aiFeedback(feedback, grade)).text) } catch (err) { fail(err) } finally { setBusy(false) } }}>✨</button>
       <label className="check"><input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} /><span>Notificar</span></label>
       <button type="submit" disabled={busy}>{busy ? 'Guardando…' : 'Guardar'}</button>
     </form>
   )
 }
 
-function SubmissionsList({ course, assign, onBack, onNeedLogin }) {
+function SubmissionsList({ course, assign, onBack, onNeedLogin, autoOpen }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('all')
@@ -69,7 +71,7 @@ function SubmissionsList({ course, assign, onBack, onNeedLogin }) {
         <button className="secondary" onClick={load}>Recargar</button>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
-      <AutoEvalPanel course={course} assign={assign} fail={fail} />
+      <AutoEvalPanel course={course} assign={assign} fail={fail} autoOpen={autoOpen} />
       {!data && !error && <p className="spinner">Consultando entregas en Florida Oberta…</p>}
       {data && (
         <>
@@ -111,17 +113,23 @@ function SubmissionsList({ course, assign, onBack, onNeedLogin }) {
   )
 }
 
-export function GradingView({ course, onNeedLogin }) {
+export function GradingView({ course, initialCmid, onNeedLogin }) {
   const [assigns, setAssigns] = useState(null)
   const [current, setCurrent] = useState(null)
   const [error, setError] = useState('')
   useEffect(() => {
     api.contents(course.id)
-      .then((d) => setAssigns(d.sections.flatMap((s) => s.items.filter((i) => i.modname === 'assign').map((i) => ({ ...i, section: s.name })))))
+      .then((d) => {
+        const list = d.sections.flatMap((s) => s.items.filter((i) => i.modname === 'assign').map((i) => ({ ...i, section: s.name })))
+        setAssigns(list)
+        if (initialCmid) {  // viene de un aviso: abrir esa tarea aunque aún no salga en los contenidos
+          setCurrent(list.find((a) => a.cmid === initialCmid) || { cmid: initialCmid, name: course._cmidName || 'Tarea', url: '' })
+        }
+      })
       .catch((err) => (err instanceof ApiError && err.status === 409 ? onNeedLogin(err.message) : setError(err.message)))
-  }, [course.id, onNeedLogin])
+  }, [course.id, initialCmid, onNeedLogin])
 
-  if (current) return <SubmissionsList course={course} assign={current} onBack={() => setCurrent(null)} onNeedLogin={onNeedLogin} />
+  if (current) return <SubmissionsList course={course} assign={current} autoOpen={current.cmid === initialCmid} onBack={() => setCurrent(null)} onNeedLogin={onNeedLogin} />
   if (error) return <p className="error" role="alert">{error}</p>
   if (!assigns) return <p className="spinner">Buscando tareas del curso…</p>
   if (!assigns.length) return <p className="muted">Este curso no tiene tareas.</p>

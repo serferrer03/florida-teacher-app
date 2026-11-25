@@ -131,3 +131,17 @@ h4 { margin: 12px 0 4px; }
 .result .row { align-items: center; }
 .result .row input[type=checkbox] { width: 24px; height: 24px; min-height: 0; accent-color: var(--accent); }
 .result { padding: 10px 14px; display: grid; gap: 8px; }
+.ai-box { border: 1px dashed var(--accent); border-radius: 12px; padding: 12px 14px; display: grid; gap: 10px; background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.notices { display: grid; gap: 8px; margin: 0 0 14px; }
+.notice-card { text-align: left; background: var(--surface); color: var(--text); border: 1px solid var(--accent); border-left: 5px solid var(--accent); font-weight: 500; padding: 12px 14px; min-height: 0; }
+.notice-card.bad { border-color: var(--danger); }
+.notice-card.subtle { border-color: var(--border); border-left-color: var(--muted); color: var(--muted); }
+.setup { max-width: 860px; margin: 0 auto; display: grid; gap: 12px; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 4px 16px; }
+.panel[open] { padding-bottom: 16px; }
+.panel > summary { font-weight: 700; font-size: 1.05rem; padding: 12px 0; cursor: pointer; }
+.qr-row { display: flex; flex-wrap: wrap; gap: 20px; }
+.qr { margin: 0; display: grid; gap: 6px; justify-items: center; text-align: center; max-width: 260px; }
+.qr img { background: #fff; padding: 8px; border-radius: 10px; }
+.steps-list { padding-left: 20px; display: grid; gap: 6px; margin: 0; }
+.badge.ok { background: color-mix(in srgb, #1a7f37 18%, transparent); }

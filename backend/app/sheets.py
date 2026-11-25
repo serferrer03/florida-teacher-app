@@ -8,27 +8,28 @@ actualiza. No hace falta dar a esta app acceso a toda la cuenta de Google.
 from __future__ import annotations
 
 import logging
-import os
 
 import httpx
+
+from . import settings_store
 
 log = logging.getLogger(__name__)
 
 
 def configured() -> bool:
-    return bool(os.environ.get("GOOGLE_SHEETS_WEBHOOK_URL") and os.environ.get("GOOGLE_SHEETS_SECRET"))
+    return bool(settings_store.get("sheets_url") and settings_store.get("sheets_secret"))
 
 
-async def push(rows: list[dict]) -> str | None:
+async def push(rows: list[dict], allow_empty: bool = False) -> str | None:
     """Envía filas; devuelve un mensaje de error o None si fue bien (o no está configurado)."""
-    if not configured() or not rows:
+    if not configured() or (not rows and not allow_empty):
         return None
-    url = os.environ["GOOGLE_SHEETS_WEBHOOK_URL"]
+    url = settings_store.get("sheets_url")
     if not url.startswith("https://script.google.com/"):
         return "GOOGLE_SHEETS_WEBHOOK_URL debe ser una URL de Apps Script (https://script.google.com/...)"
     try:
         async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-            r = await client.post(url, json={"secret": os.environ["GOOGLE_SHEETS_SECRET"], "rows": rows})
+            r = await client.post(url, json={"secret": settings_store.get("sheets_secret"), "rows": rows})
         data = r.json()
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("No se pudo actualizar la hoja de Google (%s)", type(exc).__name__)
