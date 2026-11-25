@@ -99,7 +99,7 @@ async def _claude(system: str, parts: list[dict], schema: dict, max_tokens: int)
     if response.stop_reason == "max_tokens":
         raise AIError("La respuesta de la IA quedó incompleta")
     text = next((b.text for b in response.content if b.type == "text"), "")
-    return json.loads(text)
+    return _parse(text)
 
 
 async def _gemini(system: str, parts: list[dict], schema: dict) -> dict:
@@ -137,7 +137,17 @@ async def _gemini(system: str, parts: list[dict], schema: dict) -> dict:
     text = response.text or ""
     if not text:
         raise AIRefused("La IA no devolvió respuesta (posible bloqueo de seguridad)")
-    return json.loads(text)
+    return _parse(text)
+
+
+def _parse(text: str) -> dict:
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise AIError("La IA devolvió una respuesta no válida") from exc
+    if not isinstance(data, dict):
+        raise AIError("La IA devolvió una respuesta no válida")
+    return data
 
 
 async def test() -> str:

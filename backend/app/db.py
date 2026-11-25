@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS autoeval_results (
     userid INTEGER NOT NULL,
     name_enc BLOB NOT NULL,             -- nombre del alumno CIFRADO
     grade REAL,
-    observation_enc BLOB,               -- observación CIFRADA
+    observation_enc BLOB,               -- observación CIFRADA (la que verá el alumno)
+    note_enc BLOB,                      -- motivo de revisión CIFRADO (solo para el profesor)
     status TEXT NOT NULL,               -- proposed | needs_review | published
     updated_at TEXT NOT NULL,
     PRIMARY KEY (cmid, userid)
@@ -84,6 +85,9 @@ class Database:
 
     @staticmethod
     def _migrate(conn: sqlite3.Connection) -> None:
+        cols_r = {r["name"] for r in conn.execute("PRAGMA table_info(autoeval_results)")}
+        if cols_r and "note_enc" not in cols_r:
+            conn.execute("ALTER TABLE autoeval_results ADD COLUMN note_enc BLOB")
         # v0.1: password_enc era NOT NULL; ahora es opcional.
         cols = {r["name"]: r for r in conn.execute("PRAGMA table_info(credentials)")}
         if cols.get("password_enc") is not None and cols["password_enc"]["notnull"]:
@@ -214,14 +218,14 @@ class Database:
             conn.execute("DELETE FROM autoeval_results WHERE cmid = ?", (cmid,))
 
     def save_result(self, cmid: int, userid: int, name_enc: bytes, grade: float | None,
-                    observation_enc: bytes | None, status: str) -> None:
+                    observation_enc: bytes | None, status: str, note_enc: bytes | None = None) -> None:
         with self.connect() as conn:
             conn.execute(
-                "INSERT INTO autoeval_results (cmid, userid, name_enc, grade, observation_enc, status, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(cmid, userid) DO UPDATE SET name_enc=excluded.name_enc, "
-                "grade=excluded.grade, observation_enc=excluded.observation_enc, status=excluded.status, "
-                "updated_at=excluded.updated_at",
-                (cmid, userid, name_enc, grade, observation_enc, status, now_iso()))
+                "INSERT INTO autoeval_results (cmid, userid, name_enc, grade, observation_enc, note_enc, status, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(cmid, userid) DO UPDATE SET name_enc=excluded.name_enc, "
+                "grade=excluded.grade, observation_enc=excluded.observation_enc, note_enc=excluded.note_enc, "
+                "status=excluded.status, updated_at=excluded.updated_at",
+                (cmid, userid, name_enc, grade, observation_enc, note_enc, status, now_iso()))
 
     def list_results(self, cmid: int) -> list[dict]:
         with self.connect() as conn:

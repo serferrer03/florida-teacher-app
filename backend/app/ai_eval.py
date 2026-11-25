@@ -53,6 +53,7 @@ SCHEMA = {
 class Submission:
     onlinetext: str
     files: list[tuple[str, bytes]]   # (nombre original, contenido)
+    missing: int = 0                 # archivos que no se pudieron descargar
 
 
 @dataclass
@@ -124,9 +125,15 @@ async def evaluate(task: str, criteria: str, grade_max: float, sub: Submission) 
         if "clave" in str(exc) or "configurada" in str(exc):
             raise  # problema de configuración: que falle la evaluación entera
         return Evaluation(None, "", True, str(exc))
-    grade = max(0.0, min(float(data["grade"]), grade_max))
-    review = bool(data["needs_review"]) or bool(skipped)
-    reason = data.get("review_reason") or ""
+    try:
+        grade = max(0.0, min(float(data["grade"]), grade_max))
+        observation = str(data["observation"]).strip()
+        review = bool(data.get("needs_review")) or bool(skipped) or bool(sub.missing)
+        reason = str(data.get("review_reason") or "")
+    except (KeyError, TypeError, ValueError):
+        return Evaluation(None, "", True, "La IA devolvió una respuesta incompleta")
+    if sub.missing:
+        reason = (reason + " " if reason else "") + f"{sub.missing} archivo(s) no se pudieron descargar."
     if skipped:
         reason = (reason + " " if reason else "") + f"Archivos no evaluados: {', '.join(skipped)}."
-    return Evaluation(round(grade, 2), data["observation"].strip(), review, reason)
+    return Evaluation(round(grade, 2), observation, review, reason)

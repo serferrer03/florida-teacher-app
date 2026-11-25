@@ -16,7 +16,7 @@ from typing import Awaitable, Callable
 from . import ai_eval, sheets
 from .crypto import CredentialCipher
 from .db import Database
-from .moodle.client import Credentials, MoodleAuthRequired, MoodleClient, MoodleError
+from .moodle.client import Credentials, MoodleAuthRequired, MoodleBusy, MoodleClient, MoodleError
 
 log = logging.getLogger(__name__)
 CHECK_EVERY_S = 300
@@ -35,11 +35,25 @@ class AutoEvaluator:
         self.evaluator = evaluator
         self._task: asyncio.Task | None = None
         self._running: set[int] = set()
+        self._tasks: set[asyncio.Task] = set()   # referencias fuertes a evaluaciones lanzadas a mano
 
     # ------------------------------------------------------------ programador
     def start(self) -> None:
+        # una evaluación interrumpida (app cerrada a medias) vuelve a la cola
+        for a in self.db.list_autoeval():
+            if a["state"] == "running":
+                self.db.set_autoeval_state(a["cmid"], "waiting", "Interrumpida: se reanudará")
         if self._task is None:
             self._task = asyncio.create_task(self._loop())
+
+    def launch(self, cmid: int) -> None:
+        """Evaluar ya, en segundo plano (desde el botón «Evaluar ahora»)."""
+        task = asyncio.create_task(self.run(cmid))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    def is_running(self, cmid: int) -> bool:
+        return cmid in self._running
 
     async def stop(self) -> None:
         if self._task:
@@ -72,40 +86,50 @@ class AutoEvaluator:
         self._running.add(cmid)
         self.db.set_autoeval_state(cmid, "running")
         try:
+            published = {r["userid"] for r in self.db.list_results(cmid) if r["status"] == "published"}
             subs = await self.get_moodle().collect_submissions(self.get_creds(), cmid)
             log.info("Evaluación automática: %d entregas", len(subs))
             rows = []
             for s in subs:
+                if s["userid"] in published:
+                    continue  # nunca se sustituye una nota ya publicada
                 ev = await self.evaluator(a["name"], a["criteria"], a["grade_max"],
-                                          ai_eval.Submission(s["onlinetext"], s["files"]))
-                obs = ev.observation if not ev.needs_review else (
-                    f"[Revisar: {ev.review_reason}] {ev.observation}".strip())
+                                          ai_eval.Submission(s["onlinetext"], s["files"], s.get("missing", 0)))
                 status = "needs_review" if ev.needs_review else "proposed"
                 self.db.save_result(cmid, s["userid"], self.cipher.encrypt(s["name"]), ev.grade,
-                                    self.cipher.encrypt(obs), status)
-                rows.append(self.sheet_row(a, s["name"], ev.grade, obs, status))
+                                    self.cipher.encrypt(ev.observation),
+                                    status, self.cipher.encrypt(ev.review_reason) if ev.review_reason else None)
+                rows.append(self.sheet_row(a, s["name"], ev.grade, ev.observation, status, ev.review_reason))
             err = await sheets.push(rows)
-            self.db.set_autoeval_state(cmid, "review", err, evaluated=True)
-        except MoodleAuthRequired:
-            # se reintentará en la siguiente vuelta cuando se reconecte la sesión
-            self.db.set_autoeval_state(cmid, "waiting", "Hace falta reconectar con Florida Oberta")
+            done = subs and all(s["userid"] in published for s in subs)
+            self.db.set_autoeval_state(cmid, "done" if done else "review", err, evaluated=True)
+        except (MoodleAuthRequired, MoodleBusy) as exc:
+            # se reintentará en la siguiente vuelta del programador
+            msg = "Hace falta reconectar con Florida Oberta" if isinstance(exc, MoodleAuthRequired) else \
+                "Había un inicio de sesión en curso; se reintentará"
+            self.db.set_autoeval_state(cmid, "waiting", msg)
         except MoodleError as exc:
             self.db.set_autoeval_state(cmid, "error", str(exc))
-        except Exception as exc:  # noqa: BLE001 - p. ej. error de la API de IA
+        except asyncio.CancelledError:
+            self.db.set_autoeval_state(cmid, "waiting", "Interrumpida: se reanudará")
+            raise
+        except Exception as exc:  # noqa: BLE001 - p. ej. clave de IA no válida
             log.warning("Evaluación automática fallida (%s)", type(exc).__name__)
-            self.db.set_autoeval_state(cmid, "error", f"{type(exc).__name__}: {str(exc)[:300]}")
+            self.db.set_autoeval_state(cmid, "error", f"{str(exc)[:300] or type(exc).__name__}")
         finally:
             self._running.discard(cmid)
 
-    def sheet_row(self, a: dict, name: str, grade: float | None, obs: str, status: str) -> dict:
+    def sheet_row(self, a: dict, name: str, grade: float | None, obs: str, status: str, note: str = "") -> dict:
         course = next((c["fullname"] for c in self.db.list_courses() if c["id"] == a["course_id"]), str(a["course_id"]))
+        estado = STATUS_LABEL[status] + (f": {note}" if note and status == "needs_review" else "")
         return {"curso": course, "tarea": a["name"], "alumno": name,
-                "nota": "" if grade is None else grade, "observacion": obs, "estado": STATUS_LABEL[status]}
+                "nota": "" if grade is None else grade, "observacion": obs, "estado": estado}
 
     def results(self, cmid: int) -> list[dict]:
         out = []
         for r in self.db.list_results(cmid):
             out.append({"userid": r["userid"], "name": self.cipher.decrypt(r["name_enc"]), "grade": r["grade"],
                         "observation": self.cipher.decrypt(r["observation_enc"]) if r["observation_enc"] else "",
+                        "note": self.cipher.decrypt(r["note_enc"]) if r.get("note_enc") else "",
                         "status": r["status"]})
         return sorted(out, key=lambda r: r["name"].lower())

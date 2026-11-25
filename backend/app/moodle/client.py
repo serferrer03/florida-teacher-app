@@ -584,12 +584,16 @@ class MoodleClient:
             for r in rows:
                 if not r["submitted"]:
                     continue
-                files = []
+                files, missing = [], 0
                 for f in r["files"]:
-                    data, _ = await grading.fetch_file(page, self.base, f["url"])
-                    files.append((f["name"], data))
+                    try:
+                        data, _ = await grading.fetch_file(page, self.base, f["url"])
+                        files.append((f["name"], data))
+                    except MoodleError:
+                        missing += 1  # se evalúa sin ese archivo y se marca para revisar
                 text = r["onlinetext"]
                 if r.get("onlinetext_url"):
                     text = await grading.full_onlinetext(page, self.base, r["onlinetext_url"]) or text
-                out.append({"userid": r["userid"], "name": r["name"], "onlinetext": text, "files": files})
+                out.append({"userid": r["userid"], "name": r["name"], "onlinetext": text, "files": files,
+                            "missing": missing})
             return out

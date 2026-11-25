@@ -593,9 +593,12 @@ def put_autoeval(course_id: int, cmid: int, body: AutoEvalIn) -> dict:
     if db.get_meta("autoeval_ack") is None:
         raise HTTPException(403, "Primero confirma que Florida autoriza la evaluación con IA")
     prev = db.get_autoeval(cmid)
+    if prev and prev["course_id"] != course_id:
+        raise HTTPException(409, "Esa tarea pertenece a otro curso")
     db.upsert_autoeval(cmid, course_id, body.name, body.criteria.strip(), body.grade_max, body.close_at, body.enabled)
-    if not prev or prev["state"] in {"error", "waiting"}:
-        db.set_autoeval_state(cmid, "waiting")
+    stale_running = prev and prev["state"] == "running" and not autoeval.is_running(cmid)
+    if not prev or prev["state"] in {"error", "waiting"} or stale_running or prev["close_at"] != body.close_at:
+        db.set_autoeval_state(cmid, "waiting")  # (re)programada para la nueva fecha
     return {"config": db.get_autoeval(cmid)}
 
 
@@ -614,7 +617,7 @@ async def run_autoeval(course_id: int, cmid: int) -> dict:
         raise HTTPException(404, "Activa primero la evaluación automática en esta tarea")
     if not ai_eval.configured():
         raise HTTPException(409, "Configura una clave de IA en Ajustes → Inteligencia artificial")
-    asyncio.create_task(autoeval.run(cmid))
+    autoeval.launch(cmid)
     return {"started": True}
 
 
@@ -624,7 +627,10 @@ def edit_result(course_id: int, cmid: int, userid: int, body: ResultEditIn) -> d
     row = next((r for r in db.list_results(cmid) if r["userid"] == userid), None)
     if not row:
         raise HTTPException(404, "Resultado no encontrado")
-    db.save_result(cmid, userid, row["name_enc"], body.grade, cipher.encrypt(body.observation.strip()), "proposed")
+    if row["status"] == "published":
+        raise HTTPException(409, "Esa nota ya está publicada: cámbiala en Florida Oberta")
+    db.save_result(cmid, userid, row["name_enc"], body.grade, cipher.encrypt(body.observation.strip()), "proposed",
+                   row.get("note_enc"))
     return {"ok": True}
 
 
@@ -652,7 +658,7 @@ async def publish_autoeval(course_id: int, cmid: int, body: PublishIn) -> dict:
             errors.append({"userid": r["userid"], "error": str(exc)})
             continue
         row = next(x for x in db.list_results(cmid) if x["userid"] == r["userid"])
-        db.save_result(cmid, r["userid"], row["name_enc"], r["grade"], row["observation_enc"], "published")
+        db.save_result(cmid, r["userid"], row["name_enc"], r["grade"], row["observation_enc"], "published", None)
         rows.append(autoeval.sheet_row(a, r["name"], r["grade"], r["observation"], "published"))
         published += 1
     sheet_error = await sheets.push(rows)

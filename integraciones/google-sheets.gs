@@ -11,6 +11,11 @@
 const SHEET_NAME = 'Evaluaciones';
 const HEADER = ['Curso', 'Tarea', 'Alumno', 'Nota', 'Observación', 'Estado', 'Actualizado'];
 
+// Evita que un texto que empiece por = + - @ se interprete como fórmula
+function safe(v) {
+  return (typeof v === 'string' && /^[=+\-@]/.test(v)) ? "'" + v : v;
+}
+
 function doPost(e) {
   const out = (obj) => ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
   let body;
@@ -28,7 +33,7 @@ function doPost(e) {
     const index = {};
     for (let i = 1; i < values.length; i++) index[values[i][0] + '|' + values[i][1] + '|' + values[i][2]] = i + 1;
     (body.rows || []).forEach((r) => {
-      const row = [r.curso, r.tarea, r.alumno, r.nota, r.observacion, r.estado, new Date()];
+      const row = [safe(r.curso), safe(r.tarea), safe(r.alumno), r.nota, safe(r.observacion), safe(r.estado), new Date()];
       const key = r.curso + '|' + r.tarea + '|' + r.alumno;
       if (index[key]) sh.getRange(index[key], 1, 1, row.length).setValues([row]);
       else { sh.appendRow(row); index[key] = sh.getLastRow(); }

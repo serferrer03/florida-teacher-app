@@ -134,6 +134,7 @@ export function AutoEvalPanel({ course, assign, fail, autoOpen = false }) {
                         <strong className="grow">{r.name}</strong>
                         <span className="badge">{r.status === 'published' ? 'Publicada' : r.status === 'needs_review' ? 'Revisar' : 'Propuesta'}</span>
                       </div>
+                      {r.note && r.status !== 'published' && <p className="warn-note small">⚠️ Para ti (no se publica): {r.note}</p>}
                       <div className="gradebox">
                         <label>Nota<input inputMode="decimal" value={e.grade} disabled={r.status === 'published'}
                           onChange={(ev) => setEdits({ ...edits, [r.userid]: { ...e, grade: ev.target.value } })} /></label>

@@ -145,3 +145,4 @@ h4 { margin: 12px 0 4px; }
 .qr img { background: #fff; padding: 8px; border-radius: 10px; }
 .steps-list { padding-left: 20px; display: grid; gap: 6px; margin: 0; }
 .badge.ok { background: color-mix(in srgb, #1a7f37 18%, transparent); }
+.warn-note { margin: 0; color: #b54708; }

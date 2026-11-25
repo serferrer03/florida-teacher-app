@@ -100,3 +100,65 @@ def test_scheduler_runs_only_after_close(api, monkeypatch):
             json={**base, "name": "Cerrada", "close_at": "2020-01-01T00:00"})
     api.portal.call(main.autoeval.run_due)
     assert calls == [3]
+
+
+def test_autoeval_robustness(api, fake, monkeypatch):
+    import asyncio
+    login(api)
+    main = api.main
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
+    monkeypatch.setattr("app.autoeval.sheets.push", lambda rows: asyncio.sleep(0))
+    monkeypatch.setattr("app.main.sheets.push", lambda rows: asyncio.sleep(0))
+    api.post("/api/autoeval/ack", headers=h(api))
+    api.put("/api/courses/7/assign/3/autoeval", headers=h(api),
+            json={"name": "P0", "criteria": "Criterios de prueba", "grade_max": 10, "close_at": "2020-01-01T00:00"})
+
+    # 1) motivo de revisión: se guarda aparte y no se publica
+    async def review_eval(*a):
+        return ai_eval.Evaluation(4.0, "Faltan apartados.", True, "posible plagio")
+    monkeypatch.setattr(main.autoeval, "evaluator", review_eval)
+    api.portal.call(main.autoeval.run, 3)
+    r = api.get("/api/courses/7/assign/3/autoeval", headers=h(api)).json()["results"][0]
+    assert r["observation"] == "Faltan apartados." and r["note"] == "posible plagio" and r["status"] == "needs_review"
+    api.post("/api/courses/7/assign/3/autoeval/publish", headers=h(api), json={"userids": [41], "notify": False})
+    assert "plagio" not in fake.grades[41]["feedback"]
+
+    # 2) reevaluar no sustituye notas publicadas
+    async def other_eval(*a):
+        return ai_eval.Evaluation(9.9, "Otra", False)
+    monkeypatch.setattr(main.autoeval, "evaluator", other_eval)
+    api.portal.call(main.autoeval.run, 3)
+    d = api.get("/api/courses/7/assign/3/autoeval", headers=h(api)).json()
+    assert d["results"][0]["status"] == "published" and d["results"][0]["grade"] == 4.0
+    assert d["config"]["state"] == "done"
+    assert api.patch("/api/courses/7/assign/3/autoeval/results/41", headers=h(api),
+                     json={"grade": 1, "observation": "x"}).status_code == 409
+
+    # 3) sesión ocupada -> se reintenta (waiting), no error permanente
+    from app.moodle.client import MoodleBusy
+
+    async def busy(*a, **k):
+        raise MoodleBusy("ocupado")
+    monkeypatch.setattr(main.get_moodle(), "collect_submissions", busy)
+    api.portal.call(main.autoeval.run, 3)
+    assert main.db.get_autoeval(3)["state"] == "waiting"
+
+    # 4) estado «running» huérfano tras reiniciar -> vuelve a la cola
+    main.db.set_autoeval_state(3, "running")
+    main.autoeval.start()
+    assert main.db.get_autoeval(3)["state"] == "waiting"
+
+
+def test_bad_ai_reply_marks_only_that_submission(monkeypatch):
+    import asyncio
+
+    async def bad(*a, **k):
+        return {"grade": "no-es-numero"}
+    monkeypatch.setattr(ai_eval.ai, "generate_json", bad)
+    ev = asyncio.run(ai_eval.evaluate("T", "criterios", 10, ai_eval.Submission("texto", [], missing=1)))
+    assert ev.grade is None and ev.needs_review
+
+    from app import ai as ai_mod
+    import pytest
+    with pytest.raises(ai_mod.AIError):
+        ai_mod._parse("no es json")
